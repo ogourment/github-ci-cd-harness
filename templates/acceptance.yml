@@ -166,7 +166,7 @@ acceptance_notify:
 
       if [ ! -s "$acceptance_message_path" ]; then
         echo "acceptance notify skipped: missing summary at $acceptance_message_path"
-        exit 1
+        exit 0
       fi
 
       if [ -n "$ACCEPTANCE_NOTIFY_COMMAND" ]; then
