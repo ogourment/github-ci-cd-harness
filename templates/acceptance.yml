@@ -1,0 +1,179 @@
+acceptance_evidence:
+  stage: verify
+  needs:
+    - job: deploy_staging
+      artifacts: false
+  variables:
+    ATDD_ENVIRONMENT: "$ACCEPTANCE_ENVIRONMENT"
+    ATDD_TARGET: "$ACCEPTANCE_TARGET"
+    ATDD_BASE_URL: "$ACCEPTANCE_BASE_URL"
+    ATDD_APP_NAME: "$ACCEPTANCE_APP_NAME"
+    ATDD_APP_OTP_NAME: "$ACCEPTANCE_APP_OTP_NAME"
+  script:
+    - |
+      set -euo pipefail
+      : "${ACCEPTANCE_APP_NAME:=${CI_PROJECT_NAME:-project}}"
+      : "${ACCEPTANCE_TEST_COMMAND:=mix test.atdd}"
+      : "${ACCEPTANCE_EVIDENCE_DIR:=tmp/atdd}"
+      : "${ACCEPTANCE_PUBLIC_DIR:=public}"
+      : "${ACCEPTANCE_FORCE_FAILURE:=false}"
+      : "${ACCEPTANCE_FORCE_FAILURE_CODE:=42}"
+      : "${ACCEPTANCE_TELEGRAM_MESSAGE_PATH:=acceptance_summary.txt}"
+
+      acceptance_message_path="${ACCEPTANCE_EVIDENCE_DIR%/}/${ACCEPTANCE_TELEGRAM_MESSAGE_PATH}"
+      mkdir -p "$ACCEPTANCE_EVIDENCE_DIR" "$ACCEPTANCE_PUBLIC_DIR"
+      export ATDD_JOB_STARTED_AT="$(date +%s)"
+
+      set +e
+      bash -lc "$ACCEPTANCE_TEST_COMMAND" 2>&1 | tee "$ACCEPTANCE_EVIDENCE_DIR/test.log"
+      ACCEPTANCE_TEST_EXIT_CODE="${PIPESTATUS[0]:-1}"
+      set -e
+
+      if [ "${ACCEPTANCE_FORCE_FAILURE}" = "true" ]; then
+        ACCEPTANCE_TEST_EXIT_CODE="${ACCEPTANCE_FORCE_FAILURE_CODE}"
+      fi
+
+      printf 'ATDD_TEST_EXIT_CODE=%s\n' "$ACCEPTANCE_TEST_EXIT_CODE" > "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+
+      if [ ! -f "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" ]; then
+        printf '# Acceptance evidence\n\nAcceptance tests exited before evidence report was created.\n' > "$ACCEPTANCE_EVIDENCE_DIR/e2e.md"
+      fi
+
+      if [ "$ACCEPTANCE_TEST_EXIT_CODE" -ne 0 ]; then
+        mix acceptance.append_failures "$ACCEPTANCE_EVIDENCE_DIR/test.log" \
+          "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt" || true
+      fi
+
+      mix acceptance.site "$ACCEPTANCE_EVIDENCE_DIR" "$ACCEPTANCE_PUBLIC_DIR"
+
+      set +e
+      mix acceptance.gate "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" \
+        > "$ACCEPTANCE_EVIDENCE_DIR/gate_check.txt" 2>&1
+      ACCEPTANCE_GATE_EXIT_CODE="$?"
+      set -e
+      printf 'ATDD_GATE_EXIT_CODE=%s\n' "$ACCEPTANCE_GATE_EXIT_CODE" >> "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+
+      atdd_elapsed_seconds="$(( $(date +%s) - ATDD_JOB_STARTED_AT ))"
+      atdd_minutes="$(( atdd_elapsed_seconds / 60 ))"
+      atdd_seconds="$(( atdd_elapsed_seconds % 60 ))"
+
+      atdd_summary_raw="$(grep -E '[0-9]+ tests,' "$ACCEPTANCE_EVIDENCE_DIR/test.log" | tail -n 1 || true)"
+      atdd_summary="${atdd_summary_raw:-acceptance command exited with code ${ACCEPTANCE_TEST_EXIT_CODE}}"
+      atdd_scenarios="$(grep -Ec '^\|[[:space:]]*[0-9]+[[:space:]]*\| [^|]+ \| ' "$ACCEPTANCE_EVIDENCE_DIR/e2e.md || true)"
+      atdd_first_failure=""
+      if [ -s "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt" ]; then
+        atdd_first_failure="$(head -n 1 "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt")"
+      fi
+
+      atdd_failed_scenarios="$(awk -F'|' '/^\|[[:space:]]*[0-9]+[[:space:]]*\|/ {
+        index_cell=$2
+        status_cell=$3
+        scenario_cell=$4
+        gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", status_cell)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", scenario_cell)
+        if (status_cell !~ /✅/) {
+          gsub(/^\[/, \"\", scenario_cell)
+          sub(/\].*/, \"\", scenario_cell)
+          if (out == \"\") out = scenario_cell
+          else out = out "; " scenario_cell
+        }
+      } END { print out }' "$ACCEPTANCE_EVIDENCE_DIR/e2e.md")"
+
+      if [ "$ACCEPTANCE_GATE_EXIT_CODE" -eq 0 ]; then
+        atdd_status_icon="✅"
+        atdd_status_word="passed"
+      else
+        atdd_status_icon="❌"
+        atdd_status_word="failed"
+      fi
+
+      app_version="${ACCEPTANCE_APP_VERSION:-${ACCEPTANCE_GIT_SHA:-unknown}}"
+      if [ -z "${ACCEPTANCE_APP_VERSION:-}" ] && [ -f mix.exs ]; then
+        app_version="$(sed -nE 's/^[[:space:]]*version: "([^"]+)".*$/\\1/p' mix.exs | head -n 1)"
+      fi
+      app_version="${app_version:-unknown}"
+
+      {
+        echo "${atdd_status_icon} <b>[ci] acceptance ${atdd_status_word} v${app_version}</b>"
+        echo "pipeline=${CI_PIPELINE_ID} job=${CI_JOB_ID}; ${atdd_summary}; ${atdd_scenarios} scenario(s); run ${atdd_minutes}m ${atdd_seconds}s"
+        if [ -n "$atdd_first_failure" ]; then
+          echo "first failure: ${atdd_first_failure}"
+        fi
+        if [ -n "$atdd_failed_scenarios" ]; then
+          echo "failed scenarios: ${atdd_failed_scenarios}"
+        fi
+      } > "$acceptance_message_path"
+
+      if [ "${ACCEPTANCE_TEST_EXIT_CODE}" -ne 0 ] && [ -f "$ACCEPTANCE_EVIDENCE_DIR/gate_check.txt" ]; then
+        gate_summary="$(grep -m 1 '^ATDD gate failure:' "$ACCEPTANCE_EVIDENCE_DIR/gate_check.txt" || true)"
+        if [ -n "$gate_summary" ]; then
+          printf '%s\n' "${gate_summary}" >> "$acceptance_message_path"
+        fi
+      fi
+
+      cat "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+      find "$ACCEPTANCE_EVIDENCE_DIR" -maxdepth 3 -type f | sort
+  artifacts:
+    when: always
+    paths:
+      - tmp/atdd/
+      - public/
+    reports:
+      dotenv: "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+    expire_in: 1 month
+
+acceptance_gate:
+  stage: verify
+  needs:
+    - job: acceptance_evidence
+      artifacts: true
+  script:
+    - |
+      set -euo pipefail
+      : "${ACCEPTANCE_EVIDENCE_DIR:=tmp/atdd}"
+      mix acceptance.gate "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md"
+
+acceptance_pages:
+  stage: verify
+  image: alpine:3.20
+  needs:
+    - job: acceptance_evidence
+      artifacts: true
+  script:
+    - : "${ACCEPTANCE_PUBLIC_DIR:=public}"
+    - test -f "$ACCEPTANCE_PUBLIC_DIR/index.html"
+    - find "$ACCEPTANCE_PUBLIC_DIR" -maxdepth 3 -type f | sort
+  artifacts:
+    paths:
+      - public/
+    expire_in: 1 month
+
+acceptance_notify:
+  stage: production
+  image: alpine:3.20
+  needs:
+    - job: acceptance_evidence
+      artifacts: true
+    - job: acceptance_pages
+      artifacts: false
+  script:
+    - |
+      set -euo pipefail
+      : "${ACCEPTANCE_EVIDENCE_DIR:=tmp/atdd}"
+      : "${ACCEPTANCE_TELEGRAM_MESSAGE_PATH:=acceptance_summary.txt}"
+      acceptance_message_path="${ACCEPTANCE_EVIDENCE_DIR%/}/${ACCEPTANCE_TELEGRAM_MESSAGE_PATH}"
+      : "${ACCEPTANCE_NOTIFY_COMMAND:=}"
+
+      if [ ! -s "$acceptance_message_path" ]; then
+        echo "acceptance notify skipped: missing summary at $acceptance_message_path"
+        exit 1
+      fi
+
+      if [ -n "$ACCEPTANCE_NOTIFY_COMMAND" ]; then
+        sh -c "$ACCEPTANCE_NOTIFY_COMMAND" "$acceptance_message_path"
+      else
+        cat "$acceptance_message_path"
+      fi
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: always
