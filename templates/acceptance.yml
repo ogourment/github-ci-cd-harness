@@ -63,7 +63,7 @@ acceptance_evidence:
 
       atdd_summary_raw="$(grep -E '[0-9]+ tests,' "$acceptance_test_log" | tail -n 1 || true)"
       atdd_summary="${atdd_summary_raw:-acceptance command exited with code ${ACCEPTANCE_TEST_EXIT_CODE}}"
-      atdd_scenarios="$(grep -Ec '^\|[[:space:]]*[0-9]+[[:space:]]*\| [^|]+ \| ' "$ACCEPTANCE_EVIDENCE_DIR/e2e.md || true)"
+      atdd_scenarios=$(grep -E '^\|[[:space:]]*[0-9]+[[:space:]]*\|' "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" | wc -l || true)
       atdd_first_failure=""
       if [ -s "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt" ]; then
         atdd_first_failure="$(head -n 1 "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt")"
@@ -79,7 +79,7 @@ acceptance_evidence:
 
       app_version="${ACCEPTANCE_APP_VERSION:-${ACCEPTANCE_GIT_SHA:-unknown}}"
       if [ -z "${ACCEPTANCE_APP_VERSION:-}" ] && [ -f mix.exs ]; then
-        app_version="$(sed -nE 's/^[[:space:]]*version: "([^"]+)".*$/\\1/p' mix.exs | head -n 1)"
+        app_version=$(awk -F'"' '/^[[:space:]]*version:/ { print $2; exit }' mix.exs)
       fi
       app_version="${app_version:-unknown}"
 
