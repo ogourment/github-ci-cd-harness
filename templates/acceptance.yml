@@ -140,7 +140,7 @@ acceptance_pages:
     - job: acceptance_evidence
       artifacts: true
   script:
-    - : "${ACCEPTANCE_PUBLIC_DIR:=public}"
+    - ': "${ACCEPTANCE_PUBLIC_DIR:=public}"'
     - test -f "$ACCEPTANCE_PUBLIC_DIR/index.html"
     - find "$ACCEPTANCE_PUBLIC_DIR" -maxdepth 3 -type f | sort
   artifacts:
