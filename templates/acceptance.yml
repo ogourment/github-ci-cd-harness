@@ -21,13 +21,17 @@ acceptance_evidence:
       : "${ACCEPTANCE_TELEGRAM_MESSAGE_PATH:=acceptance_summary.txt}"
 
       acceptance_message_path="${ACCEPTANCE_EVIDENCE_DIR%/}/${ACCEPTANCE_TELEGRAM_MESSAGE_PATH}"
-      mkdir -p "$ACCEPTANCE_EVIDENCE_DIR" "$ACCEPTANCE_PUBLIC_DIR"
+      mkdir -p "$ACCEPTANCE_EVIDENCE_DIR" "$ACCEPTANCE_PUBLIC_DIR" tmp/ci
+      acceptance_test_log="tmp/ci/acceptance_test.log"
       export ATDD_JOB_STARTED_AT="$(date +%s)"
 
       set +e
-      bash -lc "$ACCEPTANCE_TEST_COMMAND" 2>&1 | tee "$ACCEPTANCE_EVIDENCE_DIR/test.log"
+      bash -lc "$ACCEPTANCE_TEST_COMMAND" 2>&1 | tee "$acceptance_test_log"
       ACCEPTANCE_TEST_EXIT_CODE="${PIPESTATUS[0]:-1}"
       set -e
+
+      mkdir -p "$ACCEPTANCE_EVIDENCE_DIR"
+      cp "$acceptance_test_log" "$ACCEPTANCE_EVIDENCE_DIR/test.log"
 
       if [ "${ACCEPTANCE_FORCE_FAILURE}" = "true" ]; then
         ACCEPTANCE_TEST_EXIT_CODE="${ACCEPTANCE_FORCE_FAILURE_CODE}"
@@ -40,7 +44,7 @@ acceptance_evidence:
       fi
 
       if [ "$ACCEPTANCE_TEST_EXIT_CODE" -ne 0 ]; then
-        mix acceptance.append_failures "$ACCEPTANCE_EVIDENCE_DIR/test.log" \
+        mix acceptance.append_failures "$acceptance_test_log" \
           "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt" || true
       fi
 
@@ -57,27 +61,13 @@ acceptance_evidence:
       atdd_minutes="$(( atdd_elapsed_seconds / 60 ))"
       atdd_seconds="$(( atdd_elapsed_seconds % 60 ))"
 
-      atdd_summary_raw="$(grep -E '[0-9]+ tests,' "$ACCEPTANCE_EVIDENCE_DIR/test.log" | tail -n 1 || true)"
+      atdd_summary_raw="$(grep -E '[0-9]+ tests,' "$acceptance_test_log" | tail -n 1 || true)"
       atdd_summary="${atdd_summary_raw:-acceptance command exited with code ${ACCEPTANCE_TEST_EXIT_CODE}}"
       atdd_scenarios="$(grep -Ec '^\|[[:space:]]*[0-9]+[[:space:]]*\| [^|]+ \| ' "$ACCEPTANCE_EVIDENCE_DIR/e2e.md || true)"
       atdd_first_failure=""
       if [ -s "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt" ]; then
         atdd_first_failure="$(head -n 1 "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt")"
       fi
-
-      atdd_failed_scenarios="$(awk -F'|' '/^\|[[:space:]]*[0-9]+[[:space:]]*\|/ {
-        index_cell=$2
-        status_cell=$3
-        scenario_cell=$4
-        gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", status_cell)
-        gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", scenario_cell)
-        if (status_cell !~ /✅/) {
-          gsub(/^\[/, \"\", scenario_cell)
-          sub(/\].*/, \"\", scenario_cell)
-          if (out == \"\") out = scenario_cell
-          else out = out "; " scenario_cell
-        }
-      } END { print out }' "$ACCEPTANCE_EVIDENCE_DIR/e2e.md")"
 
       if [ "$ACCEPTANCE_GATE_EXIT_CODE" -eq 0 ]; then
         atdd_status_icon="✅"
@@ -98,9 +88,6 @@ acceptance_evidence:
         echo "pipeline=${CI_PIPELINE_ID} job=${CI_JOB_ID}; ${atdd_summary}; ${atdd_scenarios} scenario(s); run ${atdd_minutes}m ${atdd_seconds}s"
         if [ -n "$atdd_first_failure" ]; then
           echo "first failure: ${atdd_first_failure}"
-        fi
-        if [ -n "$atdd_failed_scenarios" ]; then
-          echo "failed scenarios: ${atdd_failed_scenarios}"
         fi
       } > "$acceptance_message_path"
 
