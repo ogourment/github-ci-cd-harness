@@ -163,6 +163,8 @@ acceptance_notify:
       fi
 
       if [ -n "$ACCEPTANCE_NOTIFY_COMMAND" ]; then
+        export ACCEPTANCE_MESSAGE_PATH="$acceptance_message_path"
+        export ACCEPTANCE_MESSAGE="$(cat "$acceptance_message_path")"
         sh -c "$ACCEPTANCE_NOTIFY_COMMAND" "$acceptance_message_path"
       else
         cat "$acceptance_message_path"
