@@ -14,6 +14,7 @@ acceptance_evidence:
       set -euo pipefail
       : "${ACCEPTANCE_APP_NAME:=${CI_PROJECT_NAME:-project}}"
       : "${ACCEPTANCE_TEST_COMMAND:=mix test.atdd}"
+      : "${ACCEPTANCE_MIX_ENV:=test}"
       : "${ACCEPTANCE_EVIDENCE_DIR:=tmp/atdd}"
       : "${ACCEPTANCE_PUBLIC_DIR:=public}"
       : "${ACCEPTANCE_FORCE_FAILURE:=false}"
@@ -44,14 +45,14 @@ acceptance_evidence:
       fi
 
       if [ "$ACCEPTANCE_TEST_EXIT_CODE" -ne 0 ]; then
-        mix acceptance.append_failures "$acceptance_test_log" \
+        MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.append_failures "$acceptance_test_log" \
           "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt" || true
       fi
 
-      mix acceptance.site "$ACCEPTANCE_EVIDENCE_DIR" "$ACCEPTANCE_PUBLIC_DIR"
+      MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.site "$ACCEPTANCE_EVIDENCE_DIR" "$ACCEPTANCE_PUBLIC_DIR"
 
       set +e
-      mix acceptance.gate "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" \
+      MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.gate "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" \
         > "$ACCEPTANCE_EVIDENCE_DIR/gate_check.txt" 2>&1
       ACCEPTANCE_GATE_EXIT_CODE="$?"
       set -e
@@ -61,9 +62,8 @@ acceptance_evidence:
       atdd_minutes="$(( atdd_elapsed_seconds / 60 ))"
       atdd_seconds="$(( atdd_elapsed_seconds % 60 ))"
 
-      atdd_summary_raw="$(grep -E '[0-9]+ tests,' "$acceptance_test_log" | tail -n 1 || true)"
-      atdd_summary="${atdd_summary_raw:-acceptance command exited with code ${ACCEPTANCE_TEST_EXIT_CODE}}"
       atdd_scenarios=$(grep -E '^\|[[:space:]]*[0-9]+[[:space:]]*\|' "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" | wc -l || true)
+      atdd_steps=$(grep -Ec '^###[[:space:]]+' "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" || true)
       atdd_first_failure=""
       if [ -s "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt" ]; then
         atdd_first_failure="$(head -n 1 "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt")"
@@ -84,10 +84,15 @@ acceptance_evidence:
       app_version="${app_version:-unknown}"
 
       {
-        echo "${atdd_status_icon} <b>[ci] acceptance ${atdd_status_word} v${app_version}</b>"
-        echo "pipeline=${CI_PIPELINE_ID} job=${CI_JOB_ID}; ${atdd_summary}; ${atdd_scenarios} scenario(s); run ${atdd_minutes}m ${atdd_seconds}s"
+        echo "${atdd_status_icon} <b>Acceptance ${atdd_status_word}</b>"
+        echo "App: <code>${ACCEPTANCE_APP_NAME}</code>"
+        echo "Version: <code>v${app_version}</code>"
+        echo "Pipeline: <code>${CI_PIPELINE_ID}</code> job <code>${CI_JOB_ID}</code>"
+        echo "Evidence: ${atdd_scenarios} scenario(s), ${atdd_steps} step(s)"
+        echo "Exit: test <code>${ACCEPTANCE_TEST_EXIT_CODE}</code>, gate <code>${ACCEPTANCE_GATE_EXIT_CODE}</code>"
+        echo "Finished in <code>${atdd_minutes}m ${atdd_seconds}s</code>."
         if [ -n "$atdd_first_failure" ]; then
-          echo "first failure: ${atdd_first_failure}"
+          echo "First failure: ${atdd_first_failure}"
         fi
       } > "$acceptance_message_path"
 
@@ -118,7 +123,8 @@ acceptance_gate:
     - |
       set -euo pipefail
       : "${ACCEPTANCE_EVIDENCE_DIR:=tmp/atdd}"
-      mix acceptance.gate "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md"
+      : "${ACCEPTANCE_MIX_ENV:=test}"
+      MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.gate "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md"
 
 acceptance_pages:
   stage: verify
