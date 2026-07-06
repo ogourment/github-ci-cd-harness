@@ -39,6 +39,7 @@ acceptance_evidence:
       fi
 
       printf 'ATDD_TEST_EXIT_CODE=%s\n' "$ACCEPTANCE_TEST_EXIT_CODE" > "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+      printf 'ACCEPTANCE_TELEGRAM_MESSAGE_PATH=%s\n' "$ACCEPTANCE_TELEGRAM_MESSAGE_PATH" >> "$ACCEPTANCE_EVIDENCE_DIR/status.env"
 
       if [ ! -f "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" ]; then
         printf '# Acceptance evidence\n\nAcceptance tests exited before evidence report was created.\n' > "$ACCEPTANCE_EVIDENCE_DIR/e2e.md"
@@ -82,12 +83,24 @@ acceptance_evidence:
         app_version=$(awk -F'"' '/^[[:space:]]*version:/ { print $2; exit }' mix.exs)
       fi
       app_version="${app_version:-unknown}"
+      public_path="${ACCEPTANCE_PUBLIC_DIR#public/}"
+      public_path="${public_path%/}"
+      if [ -n "${CI_PAGES_URL:-}" ]; then
+        if [ "$public_path" != "$ACCEPTANCE_PUBLIC_DIR" ] && [ -n "$public_path" ]; then
+          acceptance_report_url="${CI_PAGES_URL%/}/${public_path}/"
+        else
+          acceptance_report_url="${CI_PAGES_URL%/}/"
+        fi
+      else
+        acceptance_report_url="${CI_JOB_URL}/artifacts/file/${ACCEPTANCE_PUBLIC_DIR%/}/index.html"
+      fi
 
       {
         echo "${atdd_status_icon} <b>Acceptance ${atdd_status_word}</b>"
         echo "App: <code>${ACCEPTANCE_APP_NAME}</code>"
         echo "Version: <code>v${app_version}</code>"
         echo "Pipeline: <code>${CI_PIPELINE_ID}</code> job <code>${CI_JOB_ID}</code>"
+        echo "Evidence report: <a href=\"${acceptance_report_url}\">open report</a>"
         echo "Evidence: ${atdd_scenarios} scenario(s), ${atdd_steps} step(s)"
         echo "Exit: test <code>${ACCEPTANCE_TEST_EXIT_CODE}</code>, gate <code>${ACCEPTANCE_GATE_EXIT_CODE}</code>"
         echo "Finished in <code>${atdd_minutes}m ${atdd_seconds}s</code>."
