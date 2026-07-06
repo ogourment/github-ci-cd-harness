@@ -94,6 +94,9 @@ deploy_prod:
 If you already use an existing `pages` job, keep it as-is and call it separately from
 the template job. This template only defines `acceptance_pages`.
 
+For faster Playwright-backed acceptance jobs, use a prebuilt Elixir/Playwright CI image.
+See [docs/ci_ghcr_image_recipe.md](docs/ci_ghcr_image_recipe.md).
+
 ## Notes
 
 - Evidence artifacts and site output are published even when acceptance fails.
