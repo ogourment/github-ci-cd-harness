@@ -13,7 +13,7 @@ Include this repository in consuming pipelines:
 ```yaml
 include:
   - project: olivierg/gitlab-ci-harness
-    ref: v0.1.7
+    ref: v0.1.8
     file: /templates/acceptance.yml
 ```
 
@@ -102,9 +102,12 @@ the template job. This template only defines `acceptance_pages`.
 For faster Playwright-backed acceptance jobs, use a prebuilt Elixir/Playwright CI image.
 See [docs/ci_ghcr_image_recipe.md](docs/ci_ghcr_image_recipe.md).
 
+For a complete Phoenix project handoff recipe, including Telegram notifications, see
+[docs/phoenix_acceptance_ci_recipe.md](docs/phoenix_acceptance_ci_recipe.md).
+
 ## Notes
 
 - Evidence artifacts and site output are published even when acceptance fails.
 - `acceptance_gate` is the explicit blocking gate.
 - `acceptance_notify` always runs in `production` stage and can be configured to
-  send notifications via `ACCEPTANCE_NOTIFY_COMMAND`.
+  send notifications directly through Telegram Bot API or via `ACCEPTANCE_NOTIFY_COMMAND`.
