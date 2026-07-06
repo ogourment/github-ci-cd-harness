@@ -1,6 +1,10 @@
-# acceptance-gitlab-ci
+# gitlab-ci-harness
 
-Reusable GitLab CI template jobs for Phoenix acceptance evidence and deployment gates.
+Reusable GitLab CI templates and recipes for Phoenix/Elixir delivery pipelines.
+
+This repository is the broader successor to `olivierg/acceptance-gitlab-ci`. The
+old repository remains available as a compatibility include source while projects
+migrate progressively.
 
 ## Provided template
 
@@ -8,7 +12,8 @@ Include this repository in consuming pipelines:
 
 ```yaml
 include:
-  - project: olivierg/acceptance-gitlab-ci
+  - project: olivierg/gitlab-ci-harness
+    ref: v0.1.7
     file: /templates/acceptance.yml
 ```
 
