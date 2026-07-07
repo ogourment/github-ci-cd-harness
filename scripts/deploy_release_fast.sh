@@ -5,6 +5,7 @@ target="${1:?target required}"
 
 : "${CI_CD_OTP_APP:?CI_CD_OTP_APP is required}"
 : "${CI_CD_DEPLOY_HOST:?CI_CD_DEPLOY_HOST is required}"
+: "${CI_CD_DEPLOY_SSH_HOST:=${CI_CD_DEPLOY_HOST}}"
 : "${CI_CD_DEPLOY_SSH_USER:=deploy}"
 : "${CI_CD_DEPLOY_SSH_PRIVATE_KEY:?CI_CD_DEPLOY_SSH_PRIVATE_KEY is required}"
 : "${CI_CD_RELEASE_ARTIFACT_KIND:=directory}"
@@ -19,7 +20,7 @@ version="$(cat _build/VERSION)"
 install -m 700 -d ~/.ssh
 printf '%s\n' "$CI_CD_DEPLOY_SSH_PRIVATE_KEY" > ~/.ssh/gitlab_ci_cd_deploy_key
 chmod 600 ~/.ssh/gitlab_ci_cd_deploy_key
-ssh-keyscan -H "$CI_CD_DEPLOY_HOST" >> ~/.ssh/known_hosts
+ssh-keyscan -H "$CI_CD_DEPLOY_SSH_HOST" >> ~/.ssh/known_hosts
 
 ssh_opts=(
   -i "$HOME/.ssh/gitlab_ci_cd_deploy_key"
@@ -47,20 +48,20 @@ retry() {
 case "$CI_CD_RELEASE_ARTIFACT_KIND" in
   directory)
     remote_release_dir="${CI_CD_REMOTE_RELEASES_ROOT%/}/${release_id}"
-    retry ssh "${ssh_opts[@]}" "$CI_CD_DEPLOY_SSH_USER@$CI_CD_DEPLOY_HOST" "mkdir -p '$remote_release_dir'"
+    retry ssh "${ssh_opts[@]}" "$CI_CD_DEPLOY_SSH_USER@$CI_CD_DEPLOY_SSH_HOST" "mkdir -p '$remote_release_dir'"
     retry rsync -az --delete -e "ssh -i $HOME/.ssh/gitlab_ci_cd_deploy_key -o IdentitiesOnly=yes -o IdentityAgent=none" \
       "${CI_CD_RELEASE_ARTIFACT_PATH%/}/" \
-      "$CI_CD_DEPLOY_SSH_USER@$CI_CD_DEPLOY_HOST:$remote_release_dir/"
-    retry ssh "${ssh_opts[@]}" "$CI_CD_DEPLOY_SSH_USER@$CI_CD_DEPLOY_HOST" \
+      "$CI_CD_DEPLOY_SSH_USER@$CI_CD_DEPLOY_SSH_HOST:$remote_release_dir/"
+    retry ssh "${ssh_opts[@]}" "$CI_CD_DEPLOY_SSH_USER@$CI_CD_DEPLOY_SSH_HOST" \
       "sudo '$CI_CD_REMOTE_DEPLOY_SCRIPT' '$release_id' '$CI_CD_RUN_MIGRATIONS'"
     ;;
   archive)
     archive="$(cat _build/RELEASE_ARCHIVE)"
     remote_archive_dir="${CI_CD_REMOTE_ARCHIVE_DIR:-/var/tmp/${CI_CD_OTP_APP}_deploy}"
     remote_archive="${remote_archive_dir}/${CI_CD_OTP_APP}-${release_id}.tar.gz"
-    retry ssh "${ssh_opts[@]}" "$CI_CD_DEPLOY_SSH_USER@$CI_CD_DEPLOY_HOST" "install -m 700 -d '$remote_archive_dir'"
-    retry scp "${ssh_opts[@]}" "$archive" "$CI_CD_DEPLOY_SSH_USER@$CI_CD_DEPLOY_HOST:$remote_archive"
-    retry ssh "${ssh_opts[@]}" "$CI_CD_DEPLOY_SSH_USER@$CI_CD_DEPLOY_HOST" \
+    retry ssh "${ssh_opts[@]}" "$CI_CD_DEPLOY_SSH_USER@$CI_CD_DEPLOY_SSH_HOST" "install -m 700 -d '$remote_archive_dir'"
+    retry scp "${ssh_opts[@]}" "$archive" "$CI_CD_DEPLOY_SSH_USER@$CI_CD_DEPLOY_SSH_HOST:$remote_archive"
+    retry ssh "${ssh_opts[@]}" "$CI_CD_DEPLOY_SSH_USER@$CI_CD_DEPLOY_SSH_HOST" \
       "sudo '$CI_CD_REMOTE_DEPLOY_SCRIPT' '$remote_archive' '$release_id' '$CI_CD_RUN_MIGRATIONS'"
     ;;
   *)

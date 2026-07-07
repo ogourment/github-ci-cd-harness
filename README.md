@@ -12,10 +12,10 @@ Include this repository in consuming pipelines:
 ```yaml
 include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.2.0
+    ref: v0.2.1
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.2.0
+    ref: v0.2.1
     file: /templates/cd.yml
 ```
 
@@ -47,6 +47,11 @@ consumer to expose the manual production deploy job.
 
 Consumers provide app identity, host variables, and secrets. The harness owns the
 deploy job body and generic deploy scripts.
+
+Use `STAGING_HOST` / `PROD_HOST` for public environment hostnames used by
+health and websocket checks. Set `STAGING_SSH_HOST` / `PROD_SSH_HOST` only when
+SSH should connect to a different host or address; by default SSH uses the
+public host.
 
 See [migrating-to-gitlab-ci-cd-harness](docs/migrating-to-gitlab-ci-cd-harness.md).
 

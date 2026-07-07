@@ -13,10 +13,10 @@ Update GitLab includes:
 ```yaml
 include:
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.0"
+    ref: "v0.2.1"
     file: "/templates/acceptance.yml"
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.0"
+    ref: "v0.2.1"
     file: "/templates/cd.yml"
 ```
 
@@ -38,6 +38,7 @@ For staging:
 ```yaml
 variables:
   STAGING_HOST: "staging.example.com"
+  STAGING_SSH_HOST: "203.0.113.10" # optional; defaults to STAGING_HOST
   STAGING_SSH_USER: "deploy"
   STAGING_REMOTE_DEPLOY_SCRIPT: "/usr/local/bin/my_app_deploy"
   STAGING_HEALTH_URL: "https://staging.example.com/health"
@@ -50,6 +51,7 @@ For production, explicitly opt in:
 variables:
   CI_CD_ENABLE_PROD_DEPLOY: "true"
   PROD_HOST: "example.com"
+  PROD_SSH_HOST: "203.0.113.11" # optional; defaults to PROD_HOST
   PROD_SSH_USER: "deploy"
   PROD_REMOTE_DEPLOY_SCRIPT: "/usr/local/bin/my_app_deploy"
   PROD_HEALTH_URL: "https://example.com/health"
@@ -58,6 +60,11 @@ variables:
 
 The protected/masked key variables remain `STAGING_SSH_PRIVATE_KEY` and
 `PROD_SSH_PRIVATE_KEY`.
+
+Use `STAGING_HOST` / `PROD_HOST` for public health and websocket verification.
+Use `STAGING_SSH_HOST` / `PROD_SSH_HOST` when deploy traffic must SSH or rsync to
+a different host, such as an IP address or a reused server with another public
+TLS hostname.
 
 ## Ansible
 
