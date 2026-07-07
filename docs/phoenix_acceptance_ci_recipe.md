@@ -102,7 +102,67 @@ acceptance_notify:
       when: always
 ```
 
-## 5. Gate production
+## 5. Keep release artifacts isolated from caches
+
+Phoenix OTP releases are directory trees. GitLab artifacts extract over the job
+workspace without deleting unrelated files, so deploy jobs must not restore a
+cache into the same `_build/prod/rel/...` path that receives the release
+artifact.
+
+Use this pattern in consuming projects:
+
+```yaml
+default:
+  cache:
+    key:
+      files:
+        - mix.lock
+        - assets/package-lock.json
+    paths:
+      - deps/
+      - _build/test/
+      - _build/dev/
+      # Do not cache _build/prod/rel. If _build/prod is cached for compile
+      # speed, wipe _build/prod/rel before building the release and disable
+      # cache in deploy jobs.
+      - assets/node_modules/
+      - .npm/
+
+build_release:
+  stage: build
+  variables:
+    MIX_ENV: "prod"
+  script:
+    - MIX_ENV=prod mix deps.get --only prod
+    - MIX_ENV=prod mix compile
+    - MIX_ENV=prod mix assets.deploy
+    - rm -rf _build/prod/rel
+    - MIX_ENV=prod mix release --overwrite
+    - awk '{print $2}' _build/prod/rel/my_app/releases/start_erl.data > _build/VERSION
+  artifacts:
+    paths:
+      - _build/prod/rel/my_app/
+      - _build/VERSION
+
+deploy_staging:
+  stage: deploy
+  cache: []
+  needs:
+    - job: build_release
+      artifacts: true
+  dependencies:
+    - build_release
+```
+
+The version stamp must come from `releases/start_erl.data`, because that is the
+release version the Erlang boot script actually starts. Do not infer the version
+from `ls releases/` when multiple stale release directories could be present.
+
+If a deploy script uploads release directories with `rsync`, use `--delete` and
+stage into an empty per-release directory. A release tarball is even safer when
+the consumer project can use one.
+
+## 6. Gate production
 
 Production deploy must depend on `acceptance_gate`, not only on `acceptance_evidence`.
 
@@ -124,7 +184,7 @@ deploy_prod:
 
 `acceptance_evidence` can succeed while the tests failed, because it still has to publish artifacts and build the evidence site. `acceptance_gate` is the blocking job.
 
-## 6. Telegram notifications
+## 7. Telegram notifications
 
 Set these CI variables in the consuming project:
 
@@ -166,7 +226,7 @@ variables:
 
 Prefer leaving this unset unless the app needs a custom transport. The shared template owns the default operator message.
 
-## 7. CI image recommendation
+## 8. CI image recommendation
 
 Use a prebuilt Elixir/Playwright image for browser-heavy acceptance jobs:
 
@@ -186,7 +246,7 @@ Do not run `npx playwright install --with-deps chromium` in jobs that use this i
 
 See [ci_ghcr_image_recipe.md](ci_ghcr_image_recipe.md) for details and timing measurements.
 
-## 8. Stable-IP external integrations
+## 9. Stable-IP external integrations
 
 Framagit shared runners do not have stable IPs. Do not call IP-allowlisted providers, such as Brevo, directly from runner-side tests.
 
@@ -199,7 +259,7 @@ For staging-backed ATDD:
 
 The runner should orchestrate the browser and evidence collection. Staging should perform calls that require stable outbound IP.
 
-## 9. Handoff checklist
+## 10. Handoff checklist
 
 - `acceptance_harness` is added to `mix.exs` and `mix.lock`.
 - `mix test.atdd` exists and runs only acceptance scenarios.
@@ -209,6 +269,9 @@ The runner should orchestrate the browser and evidence collection. Staging shoul
 - `acceptance_evidence` sets app name, target, base URL, evidence dir, public dir, and test command.
 - `acceptance_gate` is required by `deploy_prod`.
 - Evidence publishing runs even on failed acceptance.
+- Deploy jobs set `cache: []` and consume only `build_release` artifacts.
+- `build_release` removes `_build/prod/rel` before `mix release`.
+- Release version stamps are read from `releases/start_erl.data`.
 - `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set.
 - `DOCKER_AUTH_CONFIG` is set if using the private GHCR image.
 - Provider/API calls that need stable IP are delegated to staging, not the runner.

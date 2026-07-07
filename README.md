@@ -102,7 +102,8 @@ the template job. This template only defines `acceptance_pages`.
 For faster Playwright-backed acceptance jobs, use a prebuilt Elixir/Playwright CI image.
 See [docs/ci_ghcr_image_recipe.md](docs/ci_ghcr_image_recipe.md).
 
-For a complete Phoenix project handoff recipe, including Telegram notifications, see
+For a complete Phoenix project handoff recipe, including Telegram notifications
+and release artifact/cache hygiene for deploy jobs, see
 [docs/phoenix_acceptance_ci_recipe.md](docs/phoenix_acceptance_ci_recipe.md).
 
 ## Notes
