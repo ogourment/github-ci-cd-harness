@@ -12,7 +12,11 @@
 
 - name: Install runtime packages
   ansible.builtin.apt:
-    name:
+    name: "{{ phoenix_runtime_packages + (phoenix_runtime_extra_packages | default([])) }}"
+    state: present
+    update_cache: true
+  vars:
+    phoenix_runtime_packages:
       - acl
       - curl
       - jq
@@ -22,8 +26,6 @@
       - rsync
       - sudo
       - ufw
-    state: present
-    update_cache: true
 
 - name: Ensure deploy and app users exist
   ansible.builtin.user:

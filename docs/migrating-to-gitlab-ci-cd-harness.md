@@ -13,10 +13,10 @@ Update GitLab includes:
 ```yaml
 include:
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.1"
+    ref: "v0.2.2"
     file: "/templates/acceptance.yml"
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.1"
+    ref: "v0.2.2"
     file: "/templates/cd.yml"
 ```
 
@@ -80,3 +80,17 @@ variables:
   STAGING_ANSIBLE_INVENTORY: "infrastructure/inventory/staging"
   PROD_ANSIBLE_INVENTORY: "infrastructure/inventory/prod"
 ```
+
+Use host provisioning for repeatable runtime state instead of ad hoc server
+changes. App-specific OS dependencies belong in inventory through
+`phoenix_runtime_extra_packages`:
+
+```yaml
+phoenix_runtime_extra_packages:
+  - imagemagick
+  - librsvg2-bin
+```
+
+The role installs the base Phoenix release dependencies plus those extra
+packages before writing the env file, systemd service, nginx site, deploy helper,
+and sudoers rule.
