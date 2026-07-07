@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="{{ app_name }}"
+OTP_APP="{{ otp_app_name }}"
+APP_ROOT="{{ app_root }}"
+APP_USER="{{ app_user }}"
+ENV_FILE="{{ app_env_file | default(app_env_dir | default('/etc/' ~ app_name) ~ '/' ~ app_name ~ '.env') }}"
+SERVICE_NAME="{{ app_service_name | default(app_name) }}"
+RELEASE_ID="${2:-${1:?release id or archive required}}"
+RUN_MIGRATIONS="${3:-${2:-}}"
+
+if [[ "${1:-}" == *.tar.gz ]]; then
+  ARCHIVE="$1"
+  DEST_DIR="${APP_ROOT}/releases/${RELEASE_ID}"
+  rm -rf "$DEST_DIR"
+  mkdir -p "$DEST_DIR"
+  tar -xzf "$ARCHIVE" -C "$DEST_DIR" --strip-components=1
+else
+  SRC_DIR="{{ deploy_releases_root | default('/home/deploy/releases') }}/${1:?release id required}"
+  DEST_DIR="${APP_ROOT}/releases/${1}"
+  RELEASE_ID="$1"
+  rm -rf "$DEST_DIR"
+  mkdir -p "$DEST_DIR"
+  rsync -a --delete "$SRC_DIR/" "$DEST_DIR/"
+fi
+
+chown -R "$APP_USER:$APP_USER" "$DEST_DIR"
+ln -sfn "$DEST_DIR" "${APP_ROOT}/current"
+
+if [[ "$RUN_MIGRATIONS" == "migrate" ]]; then
+  sudo -u "$APP_USER" bash -lc "
+    set -euo pipefail
+    set -a
+    source '$ENV_FILE'
+    set +a
+    cd '$DEST_DIR'
+    MIX_ENV=prod bin/$OTP_APP eval '{{ release_migrate_module | default('Elixir.' ~ otp_app_name | replace('_', '') ~ '.Release') }}.migrate'
+  "
+fi
+
+systemctl restart "${SERVICE_NAME}@blue.service" || systemctl restart "${SERVICE_NAME}.service"

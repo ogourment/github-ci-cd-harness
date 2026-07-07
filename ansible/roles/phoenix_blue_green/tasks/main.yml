@@ -1,0 +1,110 @@
+---
+- name: Validate required Phoenix deployment variables
+  ansible.builtin.assert:
+    that:
+      - app_name is defined
+      - otp_app_name is defined
+      - app_user is defined
+      - app_root is defined
+      - deploy_script_path is defined
+      - server_name is defined
+    fail_msg: "Set app_name, otp_app_name, app_user, app_root, deploy_script_path, and server_name in inventory group_vars."
+
+- name: Install runtime packages
+  ansible.builtin.apt:
+    name:
+      - acl
+      - curl
+      - jq
+      - nginx
+      - postgresql
+      - postgresql-contrib
+      - rsync
+      - sudo
+      - ufw
+    state: present
+    update_cache: true
+
+- name: Ensure deploy and app users exist
+  ansible.builtin.user:
+    name: "{{ item }}"
+    shell: /bin/bash
+    create_home: true
+  loop:
+    - "{{ deploy_user | default('deploy') }}"
+    - "{{ app_user }}"
+
+- name: Ensure app directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: "0755"
+  loop:
+    - "{{ app_root }}"
+    - "{{ app_root }}/releases"
+    - "{{ app_env_dir | default('/etc/' ~ app_name) }}"
+
+- name: Install environment file
+  ansible.builtin.template:
+    src: phoenix.env.j2
+    dest: "{{ app_env_file | default(app_env_dir | default('/etc/' ~ app_name) ~ '/' ~ app_name ~ '.env') }}"
+    owner: root
+    group: "{{ app_user }}"
+    mode: "0640"
+
+- name: Install systemd slot services
+  ansible.builtin.template:
+    src: phoenix@.service.j2
+    dest: "/etc/systemd/system/{{ app_service_name | default(app_name) }}@.service"
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Install nginx site
+  ansible.builtin.template:
+    src: phoenix.nginx.j2
+    dest: "/etc/nginx/sites-available/{{ app_name }}"
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Enable nginx site
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ app_name }}"
+    dest: "/etc/nginx/sites-enabled/{{ app_name }}"
+    state: link
+  notify: Reload nginx
+
+- name: Install deploy helper
+  ansible.builtin.template:
+    src: phoenix_deploy.sh.j2
+    dest: "{{ deploy_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Allow deploy user to run deploy helper
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ app_name }}_deploy"
+    content: "{{ deploy_user | default('deploy') }} ALL=(root) NOPASSWD: {{ deploy_script_path }} *\n"
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+
+- name: Configure firewall public ports
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - allow
+      - "{{ item }}/tcp"
+  changed_when: false
+  loop: "{{ firewall_public_tcp_ports | default([80, 443]) }}"
+  when: firewall_manage | default(true)
+
+- name: Enable firewall
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - --force
+      - enable
+  changed_when: false
+  when: firewall_manage | default(true)

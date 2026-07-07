@@ -1,0 +1,173 @@
+variables:
+  CI_CD_HARNESS_PROJECT: "olivierg/gitlab-ci-cd-harness"
+  CI_CD_HARNESS_REF: "v0.2.0"
+  CI_CD_ENABLE_STAGING_DEPLOY: "true"
+  CI_CD_ENABLE_PROD_DEPLOY: "false"
+  CI_CD_ENABLE_ANSIBLE_DEPLOY_JOBS: "false"
+  CI_CD_RUN_MIGRATIONS: "migrate"
+  CI_CD_RELEASE_ARTIFACT_KIND: "directory"
+  CI_CD_REMOTE_RELEASES_ROOT: "/home/deploy/releases"
+  CI_CD_DEPLOY_TIMEOUT_SECONDS: "120"
+
+.ci_cd_fetch_harness: &ci_cd_fetch_harness
+  - |
+    set -euo pipefail
+    : "${CI_CD_HARNESS_PROJECT:=olivierg/gitlab-ci-cd-harness}"
+    : "${CI_CD_HARNESS_REF:=main}"
+    rm -rf .gitlab-ci-cd-harness
+    git clone --depth 1 --branch "$CI_CD_HARNESS_REF" \
+      "https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_CD_HARNESS_PROJECT}.git" \
+      .gitlab-ci-cd-harness
+
+build_release:
+  stage: build
+  variables:
+    MIX_ENV: "prod"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_STAGING_DEPLOY == "true"'
+      when: on_success
+    - when: never
+  before_script:
+    - apt-get update -y
+    - apt-get install -y --no-install-recommends build-essential git curl rsync nodejs npm
+    - mix local.hex --force
+    - mix local.rebar --force
+  script:
+    - |
+      set -euo pipefail
+      : "${CI_CD_OTP_APP:?CI_CD_OTP_APP is required}"
+      : "${CI_CD_BUILD_COMMAND:=mix deps.get --only prod && npm ci --prefix assets && MIX_ENV=prod mix compile && MIX_ENV=prod mix assets.deploy && MIX_ENV=prod mix release}"
+      : "${CI_CD_RELEASE_ARTIFACT_KIND:=directory}"
+      : "${CI_CD_RELEASE_ARTIFACT_PATH:=_build/prod/rel/${CI_CD_OTP_APP}}"
+
+      rm -rf _build/prod
+      bash -lc "$CI_CD_BUILD_COMMAND"
+
+      version="$(find "_build/prod/rel/${CI_CD_OTP_APP}/releases" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | sort -V | tail -1)"
+      release_id="${CI_CD_RELEASE_PREFIX:-v}${version}-${CI_COMMIT_SHORT_SHA}-${CI_PIPELINE_ID}"
+      mkdir -p _build tmp
+      printf '%s\n' "$version" > _build/VERSION
+      printf '%s\n' "$release_id" > _build/RELEASE_ID
+
+      case "$CI_CD_RELEASE_ARTIFACT_KIND" in
+        directory)
+          printf '%s\n' "$version" > "${CI_CD_RELEASE_ARTIFACT_PATH}/VERSION"
+          printf '%s\n' "$release_id" > "${CI_CD_RELEASE_ARTIFACT_PATH}/RELEASE_ID"
+          ;;
+        archive)
+          archive="tmp/${CI_CD_OTP_APP}-${release_id}.tar.gz"
+          tar -C "$(dirname "$CI_CD_RELEASE_ARTIFACT_PATH")" -czf "$archive" "$(basename "$CI_CD_RELEASE_ARTIFACT_PATH")"
+          printf '%s\n' "$archive" > _build/RELEASE_ARCHIVE
+          ;;
+        *)
+          echo "Unsupported CI_CD_RELEASE_ARTIFACT_KIND: $CI_CD_RELEASE_ARTIFACT_KIND" >&2
+          exit 2
+          ;;
+      esac
+  artifacts:
+    paths:
+      - _build/RELEASE_ID
+      - _build/VERSION
+      - _build/RELEASE_ARCHIVE
+      - _build/prod/rel/
+      - tmp/*.tar.gz
+    expire_in: 1 week
+
+.ci_cd_deploy_template:
+  stage: deploy
+  needs:
+    - job: build_release
+      artifacts: true
+  dependencies:
+    - build_release
+  before_script:
+    - apt-get update -y
+    - apt-get install -y --no-install-recommends curl git openssh-client python3 rsync
+    - *ci_cd_fetch_harness
+  script:
+    - .gitlab-ci-cd-harness/scripts/deploy_release_fast.sh "$CI_CD_DEPLOY_TARGET"
+
+deploy_staging:
+  extends: .ci_cd_deploy_template
+  variables:
+    CI_CD_DEPLOY_TARGET: "staging"
+    CI_CD_DEPLOY_HOST: "$STAGING_HOST"
+    CI_CD_DEPLOY_SSH_USER: "$STAGING_SSH_USER"
+    CI_CD_DEPLOY_SSH_PRIVATE_KEY: "$STAGING_SSH_PRIVATE_KEY"
+    CI_CD_REMOTE_DEPLOY_SCRIPT: "$STAGING_REMOTE_DEPLOY_SCRIPT"
+    CI_CD_HEALTH_URL: "$STAGING_HEALTH_URL"
+    CI_CD_WEBSOCKET_BASE_URL: "$STAGING_WEBSOCKET_BASE_URL"
+  environment:
+    name: staging
+    url: "$STAGING_ENVIRONMENT_URL"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_STAGING_DEPLOY == "true"'
+      when: on_success
+    - when: never
+
+deploy_prod:
+  extends: .ci_cd_deploy_template
+  stage: production
+  needs:
+    - job: build_release
+      artifacts: true
+    - job: deploy_staging
+      artifacts: false
+    - job: acceptance_gate
+      artifacts: false
+      optional: true
+  variables:
+    CI_CD_DEPLOY_TARGET: "prod"
+    CI_CD_DEPLOY_HOST: "$PROD_HOST"
+    CI_CD_DEPLOY_SSH_USER: "$PROD_SSH_USER"
+    CI_CD_DEPLOY_SSH_PRIVATE_KEY: "$PROD_SSH_PRIVATE_KEY"
+    CI_CD_REMOTE_DEPLOY_SCRIPT: "$PROD_REMOTE_DEPLOY_SCRIPT"
+    CI_CD_HEALTH_URL: "$PROD_HEALTH_URL"
+    CI_CD_WEBSOCKET_BASE_URL: "$PROD_WEBSOCKET_BASE_URL"
+  environment:
+    name: production
+    url: "$PROD_ENVIRONMENT_URL"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_PROD_DEPLOY == "true"'
+      when: manual
+      allow_failure: false
+    - when: never
+
+.ci_cd_ansible_deploy_template:
+  stage: deploy
+  needs:
+    - job: build_release
+      artifacts: true
+  dependencies:
+    - build_release
+  before_script:
+    - apt-get update -y
+    - apt-get install -y --no-install-recommends ansible curl git openssh-client rsync
+    - *ci_cd_fetch_harness
+  script:
+    - .gitlab-ci-cd-harness/scripts/deploy_release_ansible.sh "$CI_CD_DEPLOY_TARGET"
+
+deploy_staging_ansible:
+  extends: .ci_cd_ansible_deploy_template
+  variables:
+    CI_CD_DEPLOY_TARGET: "staging"
+    CI_CD_ANSIBLE_INVENTORY: "$STAGING_ANSIBLE_INVENTORY"
+    CI_CD_DEPLOY_SSH_PRIVATE_KEY: "$STAGING_SSH_PRIVATE_KEY"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_ANSIBLE_DEPLOY_JOBS == "true"'
+      when: manual
+      allow_failure: false
+    - when: never
+
+deploy_prod_ansible:
+  extends: .ci_cd_ansible_deploy_template
+  stage: production
+  variables:
+    CI_CD_DEPLOY_TARGET: "prod"
+    CI_CD_ANSIBLE_INVENTORY: "$PROD_ANSIBLE_INVENTORY"
+    CI_CD_DEPLOY_SSH_PRIVATE_KEY: "$PROD_SSH_PRIVATE_KEY"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_ANSIBLE_DEPLOY_JOBS == "true"'
+      when: manual
+      allow_failure: false
+    - when: never

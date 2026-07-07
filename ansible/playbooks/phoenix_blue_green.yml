@@ -1,0 +1,6 @@
+---
+- name: Provision Phoenix blue/green release host
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+  roles:
+    - role: "{{ playbook_dir }}/../roles/phoenix_blue_green"

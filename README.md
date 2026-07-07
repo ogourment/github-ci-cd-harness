@@ -1,50 +1,60 @@
-# gitlab-ci-harness
+# gitlab-ci-cd-harness
 
-Reusable GitLab CI templates and recipes for Phoenix/Elixir delivery pipelines.
+Reusable GitLab CI/CD templates and recipes for Phoenix/Elixir delivery pipelines.
 
-This repository is the broader successor to `olivierg/acceptance-gitlab-ci`. The
-old repository remains available as a compatibility include source while projects
-migrate progressively.
+This repository is the renamed successor to `olivierg/gitlab-ci-harness` and the
+broader successor to `olivierg/acceptance-gitlab-ci`.
 
-## Provided template
+## Provided templates
 
 Include this repository in consuming pipelines:
 
 ```yaml
 include:
-  - project: olivierg/gitlab-ci-harness
-    ref: v0.1.8
+  - project: olivierg/gitlab-ci-cd-harness
+    ref: v0.2.0
     file: /templates/acceptance.yml
+  - project: olivierg/gitlab-ci-cd-harness
+    ref: v0.2.0
+    file: /templates/cd.yml
 ```
 
-This file defines:
+`templates/acceptance.yml` defines:
 
 - `acceptance_evidence`
 - `acceptance_gate`
 - `acceptance_pages`
 - `acceptance_notify`
 
-The job dependency chain encoded by the template is:
-
-```text
-deploy_staging -> acceptance_evidence -> acceptance_gate
-```
-
-`deploy_prod` **must** depend on `acceptance_gate` in the consuming project.
-
-## Required consumer jobs
-
-Consumers are responsible for these existing jobs:
+`templates/cd.yml` defines:
 
 - `build_release`
 - `deploy_staging`
-- `deploy_prod`
+- `deploy_prod` (off by default)
+- `deploy_staging_ansible` (off by default)
+- `deploy_prod_ansible` (off by default)
 
-`acceptance_evidence` needs `deploy_staging` artifacts, and `acceptance_gate` depends on
-`acceptance_evidence`.
+The job dependency chain encoded by the template is:
 
-`deploy_prod` should declare `acceptance_gate` in `needs` so production deployment cannot proceed
-when acceptance fails.
+```text
+build_release -> deploy_staging -> acceptance_evidence -> acceptance_gate -> deploy_prod
+```
+
+Production deploys remain optional. Set `CI_CD_ENABLE_PROD_DEPLOY=true` in a
+consumer to expose the manual production deploy job.
+
+## Required consumer configuration
+
+Consumers provide app identity, host variables, and secrets. The harness owns the
+deploy job body and generic deploy scripts.
+
+See [migrating-to-gitlab-ci-cd-harness](docs/migrating-to-gitlab-ci-cd-harness.md).
+
+## Compatibility
+
+Projects already using `templates/acceptance.yml` can migrate first by changing
+the include project path. Add `templates/cd.yml` when ready to move deployment
+job bodies out of the consumer repository.
 
 ## Required variables
 
@@ -81,20 +91,6 @@ variables:
 
 `ACCEPTANCE_TELEGRAM_MESSAGE_PATH` is interpreted as a filename relative to
 `$ACCEPTANCE_EVIDENCE_DIR`.
-
-## Consumer integration examples
-
-Example deploy gating:
-
-```yaml
-deploy_prod:
-  stage: deploy
-  needs:
-    - job: build_release
-      artifacts: true
-    - job: acceptance_gate
-      artifacts: true
-```
 
 If you already use an existing `pages` job, keep it as-is and call it separately from
 the template job. This template only defines `acceptance_pages`.
