@@ -73,6 +73,7 @@ esac
 if [ -n "${CI_CD_HEALTH_URL:-}" ]; then
   retry curl -fsSL "$CI_CD_HEALTH_URL" | tee "/tmp/${CI_CD_OTP_APP}_${target}_health.json"
   grep -q "\"version\":\"${version}\"" "/tmp/${CI_CD_OTP_APP}_${target}_health.json"
+  grep -q "\"release_id\":\"${release_id}\"" "/tmp/${CI_CD_OTP_APP}_${target}_health.json"
 fi
 
 if [ -n "${CI_CD_WEBSOCKET_BASE_URL:-}" ] && [ -f scripts/check_live_websocket.py ]; then
