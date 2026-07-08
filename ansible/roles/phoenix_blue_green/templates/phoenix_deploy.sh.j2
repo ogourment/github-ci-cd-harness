@@ -9,6 +9,80 @@ ENV_FILE="{{ app_env_file | default(app_env_dir | default('/etc/' ~ app_name) ~ 
 SERVICE_NAME="{{ app_service_name | default(app_name) }}"
 RELEASE_ID="${2:-${1:?release id or archive required}}"
 RUN_MIGRATIONS="${3:-${2:-}}"
+REMOTE_ENV_PREFIX="{{ remote_env_prefix | default(otp_app_name | upper) }}"
+DEPLOY_ENV="{{ deploy_env | default('staging') }}"
+NOTIFY_SCRIPT="{{ telegram_notify_script | default('/usr/local/bin/' ~ app_name ~ '_telegram_notify') }}"
+DEPLOY_STARTED_EPOCH="$(date -u +%s)"
+
+env_value() {
+  local name="$1"
+  printf '%s' "${!name:-}"
+}
+
+duration_label() {
+  local seconds="${1:-}"
+
+  case "${seconds}" in
+    ''|*[!0-9]*) echo "unknown"; return ;;
+  esac
+
+  printf '%sm %ss' "$((seconds / 60))" "$((seconds % 60))"
+}
+
+metadata_value() {
+  local suffix="$1"
+  local fallback="${2:-}"
+  local value
+
+  value="$(env_value "${REMOTE_ENV_PREFIX}_${suffix}")"
+  if [[ -n "${value}" ]]; then
+    printf '%s' "${value}"
+  else
+    printf '%s' "${fallback}"
+  fi
+}
+
+APP_VERSION="$(metadata_value APP_VERSION unknown)"
+GIT_SUBJECT="$(metadata_value GIT_SUBJECT unknown)"
+GIT_MESSAGES="$(metadata_value GIT_MESSAGES "${GIT_SUBJECT}")"
+ACTOR="$(metadata_value DEPLOY_ACTOR "${USER:-unknown}")"
+CI_JOB_WAIT_SECONDS="$(metadata_value CI_JOB_WAIT_SECONDS)"
+CI_PIPELINE_CREATED_AT_EPOCH="$(metadata_value CI_PIPELINE_CREATED_AT_EPOCH)"
+HOST_DEPLOY_NOTIFY="$(metadata_value HOST_DEPLOY_NOTIFY true)"
+
+notify_telegram() {
+  if [[ "${HOST_DEPLOY_NOTIFY}" =~ ^(0|false|FALSE|no|NO)$ ]]; then
+    return 0
+  fi
+
+  if [[ -x "${NOTIFY_SCRIPT}" ]]; then
+    TELEGRAM_SILENT="${2:-true}" "${NOTIFY_SCRIPT}" "$1" || true
+  fi
+}
+
+deployment_timing_summary() {
+  local deploy_seconds total_seconds
+
+  deploy_seconds="$(($(date -u +%s) - DEPLOY_STARTED_EPOCH))"
+  total_seconds=""
+  if [[ "${CI_PIPELINE_CREATED_AT_EPOCH}" =~ ^[0-9]+$ ]]; then
+    total_seconds="$(($(date -u +%s) - CI_PIPELINE_CREATED_AT_EPOCH))"
+  fi
+
+  printf 'deploy=%s wait=%s total=%s' \
+    "$(duration_label "${deploy_seconds}")" \
+    "$(duration_label "${CI_JOB_WAIT_SECONDS}")" \
+    "$(duration_label "${total_seconds}")"
+}
+
+on_deploy_error() {
+  status="$?"
+  notify_telegram "❌ <b>[${DEPLOY_ENV}] deployment failed v${APP_VERSION}</b>
+actor=${ACTOR:-unknown} release=${RELEASE_ID:-unknown} status=${status} $(deployment_timing_summary)" false
+  exit "${status}"
+}
+
+trap on_deploy_error ERR
 
 if [[ "${1:-}" == *.tar.gz ]]; then
   ARCHIVE="$1"
@@ -40,3 +114,7 @@ if [[ "$RUN_MIGRATIONS" == "migrate" ]]; then
 fi
 
 systemctl restart "${SERVICE_NAME}@blue.service" || systemctl restart "${SERVICE_NAME}.service"
+
+notify_telegram "✅ <b>[${DEPLOY_ENV}] deployment complete v${APP_VERSION}</b>
+actor=${ACTOR} release=${RELEASE_ID} commits=$(printf '%s' "${GIT_MESSAGES}" | sed 's/\\n/\n/g' | grep -c .) $(deployment_timing_summary)" true
+trap - ERR

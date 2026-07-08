@@ -12,10 +12,10 @@ Include this repository in consuming pipelines:
 ```yaml
 include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.2.5
+    ref: v0.2.6
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.2.5
+    ref: v0.2.6
     file: /templates/cd.yml
 ```
 
@@ -105,6 +105,20 @@ variables:
 
 `ACCEPTANCE_TELEGRAM_MESSAGE_PATH` is interpreted as a filename relative to
 `$ACCEPTANCE_EVIDENCE_DIR`.
+
+## Notification policy
+
+CI/CD Telegram notifications follow one bell policy across templates:
+successful acceptance and deployment messages are sent with
+`disable_notification=true`, while failed acceptance and deployment messages are
+sent with `disable_notification=false`.
+
+The built-in acceptance Telegram sender applies this directly. Custom
+`ACCEPTANCE_NOTIFY_COMMAND` scripts receive `ACCEPTANCE_NOTIFY_SILENT=true` for
+successful acceptance and `false` for failures.
+
+Generated deploy helpers call an app-local Telegram wrapper with
+`TELEGRAM_SILENT=true` on success and `TELEGRAM_SILENT=false` on failure.
 
 If you already use an existing `pages` job, keep it as-is and call it separately from
 the template job. This template only defines `acceptance_pages`.

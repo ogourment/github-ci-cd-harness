@@ -175,9 +175,15 @@ acceptance_notify:
         exit 0
       fi
 
+      acceptance_notify_silent=false
+      if [ "${ATDD_TEST_EXIT_CODE:-1}" = "0" ] && [ "${ATDD_GATE_EXIT_CODE:-1}" = "0" ]; then
+        acceptance_notify_silent=true
+      fi
+
       if [ -n "$ACCEPTANCE_NOTIFY_COMMAND" ]; then
         export ACCEPTANCE_MESSAGE_PATH="$acceptance_message_path"
         export ACCEPTANCE_MESSAGE="$(cat "$acceptance_message_path")"
+        export ACCEPTANCE_NOTIFY_SILENT="$acceptance_notify_silent"
         sh -c "$ACCEPTANCE_NOTIFY_COMMAND" "$acceptance_message_path"
       elif [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
         if ! command -v curl >/dev/null 2>&1; then
@@ -187,7 +193,8 @@ acceptance_notify:
         curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
           --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
           --data-urlencode "text@${acceptance_message_path}" \
-          --data-urlencode "parse_mode=HTML"
+          --data-urlencode "parse_mode=HTML" \
+          --data-urlencode "disable_notification=${acceptance_notify_silent}"
       else
         cat "$acceptance_message_path"
       fi

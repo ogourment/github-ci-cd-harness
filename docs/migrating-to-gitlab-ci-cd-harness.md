@@ -13,10 +13,10 @@ Update GitLab includes:
 ```yaml
 include:
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.5"
+    ref: "v0.2.6"
     file: "/templates/acceptance.yml"
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.5"
+    ref: "v0.2.6"
     file: "/templates/cd.yml"
 ```
 
@@ -90,6 +90,10 @@ Remote helpers that send deployment alerts should read those variables instead
 of inferring release details from the server user or filesystem state. Set
 `CI_CD_REMOTE_ENV_PREFIX` only when an existing helper expects a different
 prefix.
+
+Deployment notification wrappers should honor `TELEGRAM_SILENT`. The standard
+policy is to send successful deployment messages with `TELEGRAM_SILENT=true`
+and failed deployment messages with `TELEGRAM_SILENT=false`.
 
 ## Ansible
 
