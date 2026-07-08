@@ -41,7 +41,8 @@ build_release -> deploy_staging -> acceptance_evidence -> acceptance_gate -> dep
 ```
 
 Production deploys remain optional. Set `CI_CD_ENABLE_PROD_DEPLOY=true` in a
-consumer to expose the manual production deploy job.
+consumer to expose the manual production deploy job. Optional manual deploy
+jobs are non-blocking, so a green pipeline stays green when they are not run.
 
 ## Required consumer configuration
 

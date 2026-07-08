@@ -58,6 +58,9 @@ variables:
   PROD_ENVIRONMENT_URL: "https://example.com"
 ```
 
+The production deploy job is manual and non-blocking. Enabling it exposes the
+job without forcing every successful pipeline to remain in a manual state.
+
 The protected/masked key variables remain `STAGING_SSH_PRIVATE_KEY` and
 `PROD_SSH_PRIVATE_KEY`.
 

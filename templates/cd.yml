@@ -132,7 +132,7 @@ deploy_prod:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_PROD_DEPLOY == "true"'
       when: manual
-      allow_failure: false
+      allow_failure: true
     - when: never
 
 .ci_cd_ansible_deploy_template:
@@ -158,7 +158,7 @@ deploy_staging_ansible:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_ANSIBLE_DEPLOY_JOBS == "true"'
       when: manual
-      allow_failure: false
+      allow_failure: true
     - when: never
 
 deploy_prod_ansible:
@@ -171,5 +171,5 @@ deploy_prod_ansible:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_ANSIBLE_DEPLOY_JOBS == "true"'
       when: manual
-      allow_failure: false
+      allow_failure: true
     - when: never
