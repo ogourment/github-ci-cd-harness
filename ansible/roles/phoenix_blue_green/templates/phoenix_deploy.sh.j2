@@ -78,6 +78,10 @@ deployment_timing_summary() {
     "$(duration_label "${total_seconds}")"
 }
 
+html_escape() {
+  printf '%s' "$1" | sed -e 's/&/\\&amp;/g' -e 's/</\\&lt;/g' -e 's/>/\\&gt;/g'
+}
+
 commit_count() {
   local messages
 
@@ -89,38 +93,47 @@ deployment_commit_messages() {
   local messages
   local lines_shown=0
   local max_lines=5
+  local printed=0
+  local line_count
+  local remaining
+  local message
 
   messages="${GIT_MESSAGES//\\n/$'\n'}"
   if [ -z "$messages" ]; then
     return 0
   fi
 
-  printf 'commits:\n'
+  line_count="$(commit_count)"
+  printf 'Commits: %s\n' "${line_count}"
+
   while IFS= read -r message; do
     [ -z "$message" ] && continue
-    printf '- %s\n' "$message"
+    printf '- %s\n' "$(html_escape "$message")"
     lines_shown=$((lines_shown + 1))
+    printed=$((printed + 1))
     if [ "$lines_shown" -ge "$max_lines" ]; then
+      if [ "$line_count" -gt "$printed" ]; then
+        remaining=$((line_count - printed))
+        printf '... %s more\n' "${remaining}"
+      fi
       break
     fi
   done <<< "$messages"
 }
 
 deployment_metadata_summary() {
-  printf 'actor=%s commits=%s pipeline=%s job=%s %s\n' \
-    "${ACTOR:-unknown}" \
-    "$(commit_count)" \
-    "${CI_PIPELINE_ID:-unknown}" \
-    "${CI_JOB_ID:-unknown}" \
-    "$(deployment_timing_summary)"
+  printf 'Pipeline: <code>%s</code> job <code>%s</code>\n' \
+    "$(html_escape "${CI_PIPELINE_ID:-unknown}")" \
+    "$(html_escape "${CI_JOB_ID:-unknown}")"
+  printf 'Release: <code>%s</code>\n' "$(html_escape "${RELEASE_ID:-unknown}")"
+  printf 'Actor: <code>%s</code>\n' "$(html_escape "${ACTOR:-unknown}")"
+  printf 'Timing: <code>%s</code>\n' "$(deployment_timing_summary)"
   deployment_commit_messages
 }
 
 on_deploy_error() {
   status="$?"
-  notify_telegram "❌ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} deployment failed v${APP_VERSION}</b>
-release=${RELEASE_ID:-unknown} status=${status}
-$(deployment_metadata_summary)" false
+  notify_telegram "❌ <b>${APP_DISPLAY_NAME} <code>v${APP_VERSION}</code> deployment failed</b>\nStatus: <code>${status}</code>\n$(deployment_metadata_summary)" false
   exit "${status}"
 }
 
@@ -157,6 +170,5 @@ fi
 
 systemctl restart "${SERVICE_NAME}@blue.service" || systemctl restart "${SERVICE_NAME}.service"
 
-notify_telegram "✅ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} deployment complete v${APP_VERSION}</b>
-$(deployment_metadata_summary)" true
+notify_telegram "✅ <b>${APP_DISPLAY_NAME} <code>v${APP_VERSION}</code> deployment complete</b>\n$(deployment_metadata_summary)" true
 trap - ERR
