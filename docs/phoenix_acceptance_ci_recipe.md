@@ -17,7 +17,7 @@ Acceptance evidence must be published even when the browser tests fail. Producti
 ```yaml
 include:
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.7"
+    ref: "v0.2.8"
     file: "/templates/acceptance.yml"
 ```
 
@@ -253,7 +253,9 @@ Framagit shared runners do not have stable IPs. Do not call IP-allowlisted provi
 For staging-backed ATDD:
 
 - keep provider credentials on the staging host
-- use app-specific remote eval or release helpers to seed/check provider state
+- use `scripts/atdd_remote_eval.sh` from the harness, or app-specific release
+  helpers when the generic remote eval shape does not fit, to seed/check
+  provider state
 - use dedicated ATDD prefixes, lists, users, and database objects
 - explicitly unset provider API keys before local runner-side `mix test.atdd` when needed
 
@@ -265,7 +267,7 @@ The runner should orchestrate the browser and evidence collection. Staging shoul
 - `mix test.atdd` exists and runs only acceptance scenarios.
 - Evidence paths are configured under `tmp/atdd`.
 - Scenarios call `record_pending_step/4` before fragile assertions.
-- `gitlab-ci-cd-harness@v0.2.7` is included.
+- `gitlab-ci-cd-harness@v0.2.8` is included.
 - `acceptance_evidence` sets app name, target, base URL, evidence dir, public dir, and test command.
 - `acceptance_gate` is required by `deploy_prod`.
 - Evidence publishing runs even on failed acceptance.

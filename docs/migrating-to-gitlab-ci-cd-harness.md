@@ -13,10 +13,10 @@ Update GitLab includes:
 ```yaml
 include:
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.7"
+    ref: "v0.2.8"
     file: "/templates/acceptance.yml"
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.7"
+    ref: "v0.2.8"
     file: "/templates/cd.yml"
 ```
 

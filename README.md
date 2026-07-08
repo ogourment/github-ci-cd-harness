@@ -12,10 +12,10 @@ Include this repository in consuming pipelines:
 ```yaml
 include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.2.7
+    ref: v0.2.8
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.2.7
+    ref: v0.2.8
     file: /templates/cd.yml
 ```
 
@@ -25,6 +25,10 @@ include:
 - `acceptance_gate`
 - `acceptance_pages`
 - `acceptance_notify`
+
+The package also provides `scripts/atdd_remote_eval.sh` for acceptance tests
+that need to run a release-scoped Elixir expression over SSH against a deployed
+Phoenix release.
 
 `templates/cd.yml` defines:
 
