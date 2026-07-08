@@ -1,6 +1,6 @@
 variables:
   CI_CD_HARNESS_PROJECT: "olivierg/gitlab-ci-cd-harness"
-  CI_CD_HARNESS_REF: "v0.2.16"
+  CI_CD_HARNESS_REF: "v0.2.17"
   CI_CD_ENABLE_STAGING_DEPLOY: "true"
   CI_CD_ENABLE_PROD_DEPLOY: "false"
   CI_CD_ENABLE_ANSIBLE_DEPLOY_JOBS: "false"
@@ -85,7 +85,7 @@ variables:
     if [ -n "${CI_PIPELINE_CREATED_AT:-}" ]; then
       pipeline_created_epoch="$(seconds_from_timestamp "${CI_PIPELINE_CREATED_AT}")"
       if [ -n "${pipeline_created_epoch:-}" ]; then
-        total_seconds="$((date -u +%s) - pipeline_created_epoch)"
+        total_seconds="$(($(date -u +%s) - pipeline_created_epoch))"
       fi
     fi
 

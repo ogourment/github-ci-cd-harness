@@ -25,7 +25,7 @@ if [ -z "${CI_CD_DEPLOY_INVENTORY_FILE}" ]; then
   ansible_inventory_tmp="$(mktemp)"
   trap 'rm -f "${ansible_inventory_tmp}"' EXIT
   cat > "${ansible_inventory_tmp}" <<EOF
-[deploy_target]
+[${target}]
 ${CI_CD_DEPLOY_SSH_HOST:-${CI_CD_DEPLOY_HOST}} ansible_user=${CI_CD_DEPLOY_SSH_USER:-deploy}
 EOF
   CI_CD_DEPLOY_INVENTORY_FILE="${ansible_inventory_tmp}"
