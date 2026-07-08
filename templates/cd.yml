@@ -1,6 +1,6 @@
 variables:
   CI_CD_HARNESS_PROJECT: "olivierg/gitlab-ci-cd-harness"
-  CI_CD_HARNESS_REF: "v0.2.18"
+  CI_CD_HARNESS_REF: "v0.2.19"
   CI_CD_ENABLE_STAGING_DEPLOY: "true"
   CI_CD_ENABLE_PROD_DEPLOY: "false"
   CI_CD_ENABLE_ANSIBLE_DEPLOY_JOBS: "false"
@@ -94,24 +94,24 @@ variables:
     }
 
     message="${deploy_icon} <b>[${CI_CD_DEPLOY_TARGET}] ${CI_CD_APP_NAME} <code>v${app_version}</code> ${deploy_status}</b>"
-    message="${message}\\nPipeline: <code>${pipeline_id}</code> job <code>${job_id}</code>"
-    message="${message}\\nRelease: <code>${release_id}</code>"
-    message="${message}\\nActor: <code>${actor}</code>"
-    message="${message}\\nTiming: <code>deploy=$(duration_label "${deploy_seconds}") wait=$(duration_label "${wait_seconds}") total=$(duration_label "${total_seconds}")</code>"
+    message+=$'\n'"Pipeline: <code>${pipeline_id}</code> job <code>${job_id}</code>"
+    message+=$'\n'"Release: <code>${release_id}</code>"
+    message+=$'\n'"Actor: <code>${actor}</code>"
+    message+=$'\n'"Timing: <code>deploy=$(duration_label "${deploy_seconds}") wait=$(duration_label "${wait_seconds}") total=$(duration_label "${total_seconds}")</code>"
 
     if [ "${commit_count}" -gt 0 ]; then
-      message="${message}\\nCommits: ${commit_count}"
+      message+=$'\n'"Commits: ${commit_count}"
       printed=0
       while IFS= read -r commit_line; do
         [ -z "${commit_line}" ] && continue
         if [ "$printed" -ge 5 ]; then
           continue
         fi
-        message="${message}\\n- $(html_escape "${commit_line}")"
+        message+=$'\n'"- $(html_escape "${commit_line}")"
         printed=$((printed + 1))
       done <<< "${ci_deploy_commit_messages}"
       if [ "${commit_count}" -gt 5 ]; then
-        message="${message}\\n... $((commit_count - 5)) more"
+        message+=$'\n'"... $((commit_count - 5)) more"
       fi
     fi
 
