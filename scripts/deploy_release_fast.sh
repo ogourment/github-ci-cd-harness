@@ -13,6 +13,7 @@ target="${1:?target required}"
 : "${CI_CD_REMOTE_RELEASES_ROOT:=/home/deploy/releases}"
 : "${CI_CD_REMOTE_DEPLOY_SCRIPT:?CI_CD_REMOTE_DEPLOY_SCRIPT is required}"
 : "${CI_CD_RUN_MIGRATIONS:=migrate}"
+: "${CI_CD_HOST_DEPLOY_NOTIFY:=true}"
 
 release_id="$(cat _build/RELEASE_ID)"
 version="$(cat _build/VERSION)"
@@ -197,6 +198,7 @@ remote_deploy_command() {
     "$(remote_env_assignment "${remote_env_prefix}_CI_JOB_ID" "${CI_JOB_ID:-}")"
     "$(remote_env_assignment "${remote_env_prefix}_CI_JOB_WAIT_SECONDS" "$ci_job_wait_seconds")"
     "$(remote_env_assignment "${remote_env_prefix}_CI_PIPELINE_CREATED_AT_EPOCH" "$ci_pipeline_created_epoch")"
+    "$(remote_env_assignment "${remote_env_prefix}_HOST_DEPLOY_NOTIFY" "$CI_CD_HOST_DEPLOY_NOTIFY")"
     "$remote_script"
     "$@"
   )
