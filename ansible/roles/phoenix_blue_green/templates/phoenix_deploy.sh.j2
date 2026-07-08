@@ -85,19 +85,42 @@ commit_count() {
   printf '%s\n' "${messages}" | grep -c .
 }
 
+deployment_commit_messages() {
+  local messages
+  local lines_shown=0
+  local max_lines=5
+
+  messages="${GIT_MESSAGES//\\n/$'\n'}"
+  if [ -z "$messages" ]; then
+    return 0
+  fi
+
+  printf 'commits:\n'
+  while IFS= read -r message; do
+    [ -z "$message" ] && continue
+    printf '- %s\n' "$message"
+    lines_shown=$((lines_shown + 1))
+    if [ "$lines_shown" -ge "$max_lines" ]; then
+      break
+    fi
+  done <<< "$messages"
+}
+
 deployment_metadata_summary() {
-  printf 'actor=%s commits=%s pipeline=%s job=%s %s' \
+  printf 'actor=%s commits=%s pipeline=%s job=%s %s\n' \
     "${ACTOR:-unknown}" \
     "$(commit_count)" \
     "${CI_PIPELINE_ID:-unknown}" \
     "${CI_JOB_ID:-unknown}" \
     "$(deployment_timing_summary)"
+  deployment_commit_messages
 }
 
 on_deploy_error() {
   status="$?"
   notify_telegram "❌ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} deployment failed v${APP_VERSION}</b>
-actor=${ACTOR:-unknown} release=${RELEASE_ID:-unknown} status=${status} pipeline=${CI_PIPELINE_ID:-unknown} job=${CI_JOB_ID:-unknown} $(deployment_timing_summary)" false
+release=${RELEASE_ID:-unknown} status=${status}
+$(deployment_metadata_summary)" false
   exit "${status}"
 }
 

@@ -96,9 +96,7 @@ acceptance_evidence:
       fi
 
       {
-        echo "${atdd_status_icon} <b>Acceptance ${atdd_status_word}</b>"
-        echo "App: <code>${ACCEPTANCE_APP_NAME}</code>"
-        echo "Version: <code>v${app_version}</code>"
+        echo "${atdd_status_icon} <b>${ACCEPTANCE_APP_NAME} <code>v${app_version}</code> acceptance ${atdd_status_word}</b>"
         echo "Pipeline: <code>${CI_PIPELINE_ID}</code> job <code>${CI_JOB_ID}</code>"
         echo "Evidence report: <a href=\"${acceptance_report_url}\">open report</a>"
         echo "Evidence: ${atdd_scenarios} scenario(s), ${atdd_steps} step(s)"
