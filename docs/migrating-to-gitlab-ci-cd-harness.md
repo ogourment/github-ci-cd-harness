@@ -13,10 +13,10 @@ Update GitLab includes:
 ```yaml
 include:
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.6"
+    ref: "v0.2.7"
     file: "/templates/acceptance.yml"
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.6"
+    ref: "v0.2.7"
     file: "/templates/cd.yml"
 ```
 
@@ -82,6 +82,8 @@ AGILE_U_GIT_REF
 AGILE_U_GIT_SUBJECT
 AGILE_U_GIT_MESSAGES
 AGILE_U_DEPLOY_ACTOR
+AGILE_U_CI_PIPELINE_ID
+AGILE_U_CI_JOB_ID
 AGILE_U_CI_JOB_WAIT_SECONDS
 AGILE_U_CI_PIPELINE_CREATED_AT_EPOCH
 ```

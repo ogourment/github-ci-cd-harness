@@ -12,10 +12,10 @@ Include this repository in consuming pipelines:
 ```yaml
 include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.2.6
+    ref: v0.2.7
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.2.6
+    ref: v0.2.7
     file: /templates/cd.yml
 ```
 
@@ -57,8 +57,9 @@ public host.
 Fast SSH deploys call the remote deploy helper with app-prefixed metadata
 environment variables. The default prefix is the uppercased `CI_CD_OTP_APP`
 value, for example `AGILE_U_APP_VERSION`, `AGILE_U_GIT_SHA`,
-`AGILE_U_DEPLOY_ACTOR`, `AGILE_U_CI_JOB_WAIT_SECONDS`, and
-`AGILE_U_CI_PIPELINE_CREATED_AT_EPOCH`. Override the prefix with
+`AGILE_U_DEPLOY_ACTOR`, `AGILE_U_CI_PIPELINE_ID`, `AGILE_U_CI_JOB_ID`,
+`AGILE_U_CI_JOB_WAIT_SECONDS`, and `AGILE_U_CI_PIPELINE_CREATED_AT_EPOCH`.
+Override the prefix with
 `CI_CD_REMOTE_ENV_PREFIX` only when the remote helper already expects another
 name.
 

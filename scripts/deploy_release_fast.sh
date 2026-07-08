@@ -191,6 +191,8 @@ remote_deploy_command() {
     "$(remote_env_assignment "${remote_env_prefix}_GIT_SUBJECT" "$git_subject")"
     "$(remote_env_assignment "${remote_env_prefix}_GIT_MESSAGES" "$git_messages_env")"
     "$(remote_env_assignment "${remote_env_prefix}_DEPLOY_ACTOR" "$deploy_actor")"
+    "$(remote_env_assignment "${remote_env_prefix}_CI_PIPELINE_ID" "${CI_PIPELINE_ID:-}")"
+    "$(remote_env_assignment "${remote_env_prefix}_CI_JOB_ID" "${CI_JOB_ID:-}")"
     "$(remote_env_assignment "${remote_env_prefix}_CI_JOB_WAIT_SECONDS" "$ci_job_wait_seconds")"
     "$(remote_env_assignment "${remote_env_prefix}_CI_PIPELINE_CREATED_AT_EPOCH" "$ci_pipeline_created_epoch")"
     "$remote_script"
