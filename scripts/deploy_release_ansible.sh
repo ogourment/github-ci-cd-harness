@@ -4,10 +4,23 @@ set -euo pipefail
 target="${1:?target required}"
 
 : "${CI_CD_OTP_APP:?CI_CD_OTP_APP is required}"
-: "${CI_CD_ANSIBLE_INVENTORY:?CI_CD_ANSIBLE_INVENTORY is required}"
 : "${CI_CD_DEPLOY_SSH_PRIVATE_KEY:?CI_CD_DEPLOY_SSH_PRIVATE_KEY is required}"
 : "${CI_CD_RELEASE_ARTIFACT_KIND:=directory}"
 : "${CI_CD_RELEASE_ARTIFACT_PATH:=_build/prod/rel/${CI_CD_OTP_APP}}"
+: "${CI_CD_DEPLOY_SSH_HOST:=${CI_CD_DEPLOY_HOST}}"
+
+CI_CD_DEPLOY_INVENTORY_FILE="${CI_CD_ANSIBLE_INVENTORY:-}"
+ansible_inventory_tmp=""
+
+if [ -z "${CI_CD_DEPLOY_INVENTORY_FILE}" ]; then
+  ansible_inventory_tmp="$(mktemp)"
+  trap 'rm -f "${ansible_inventory_tmp}"' EXIT
+  cat > "${ansible_inventory_tmp}" <<EOF
+[deploy_target]
+${CI_CD_DEPLOY_SSH_HOST:-${CI_CD_DEPLOY_HOST}} ansible_user=${CI_CD_DEPLOY_SSH_USER:-deploy}
+EOF
+  CI_CD_DEPLOY_INVENTORY_FILE="${ansible_inventory_tmp}"
+fi
 
 install -m 700 -d ~/.ssh
 printf '%s\n' "$CI_CD_DEPLOY_SSH_PRIVATE_KEY" > ~/.ssh/gitlab_ci_cd_deploy_key
@@ -23,7 +36,7 @@ if [ "$CI_CD_RELEASE_ARTIFACT_KIND" = "archive" ]; then
 fi
 
 ansible-playbook \
-  -i "$CI_CD_ANSIBLE_INVENTORY" \
+  -i "$CI_CD_DEPLOY_INVENTORY_FILE" \
   -e "target_hosts=${target}" \
   -e "ansible_private_key_file=$HOME/.ssh/gitlab_ci_cd_deploy_key" \
   .gitlab-ci-cd-harness/ansible/playbooks/phoenix_blue_green.yml
