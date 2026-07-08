@@ -13,10 +13,10 @@ Update GitLab includes:
 ```yaml
 include:
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.3"
+    ref: "v0.2.5"
     file: "/templates/acceptance.yml"
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.3"
+    ref: "v0.2.5"
     file: "/templates/cd.yml"
 ```
 
@@ -68,6 +68,28 @@ Use `STAGING_HOST` / `PROD_HOST` for public health and websocket verification.
 Use `STAGING_SSH_HOST` / `PROD_SSH_HOST` when deploy traffic must SSH or rsync to
 a different host, such as an IP address or a reused server with another public
 TLS hostname.
+
+## Remote deploy metadata
+
+The fast SSH deploy script passes deployment metadata through `sudo env` to the
+remote helper. By default, variable names use an uppercased app prefix derived
+from `CI_CD_OTP_APP`, so `CI_CD_OTP_APP: "agile_u"` produces:
+
+```text
+AGILE_U_APP_VERSION
+AGILE_U_GIT_SHA
+AGILE_U_GIT_REF
+AGILE_U_GIT_SUBJECT
+AGILE_U_GIT_MESSAGES
+AGILE_U_DEPLOY_ACTOR
+AGILE_U_CI_JOB_WAIT_SECONDS
+AGILE_U_CI_PIPELINE_CREATED_AT_EPOCH
+```
+
+Remote helpers that send deployment alerts should read those variables instead
+of inferring release details from the server user or filesystem state. Set
+`CI_CD_REMOTE_ENV_PREFIX` only when an existing helper expects a different
+prefix.
 
 ## Ansible
 
