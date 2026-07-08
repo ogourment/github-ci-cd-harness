@@ -82,6 +82,25 @@ html_escape() {
   printf '%s' "$1" | sed -e 's/&/\\&amp;/g' -e 's/</\\&lt;/g' -e 's/>/\\&gt;/g'
 }
 
+slot_active_dot() {
+  local slot="$1"
+  local unit="${SERVICE_NAME}@${slot}.service"
+  local status
+
+  status="$(systemctl is-active "${unit}" 2>/dev/null || true)"
+  if [ "$status" = "active" ]; then
+    printf '🟢'
+  else
+    printf '⚪'
+  fi
+}
+
+deployment_slot_summary() {
+  printf 'Slots: blue %s green %s\n' \
+    "$(slot_active_dot blue)" \
+    "$(slot_active_dot green)"
+}
+
 commit_count() {
   local messages
 
@@ -127,13 +146,14 @@ deployment_metadata_summary() {
     "$(html_escape "${CI_JOB_ID:-unknown}")"
   printf 'Release: <code>%s</code>\n' "$(html_escape "${RELEASE_ID:-unknown}")"
   printf 'Actor: <code>%s</code>\n' "$(html_escape "${ACTOR:-unknown}")"
+  deployment_slot_summary
   printf 'Timing: <code>%s</code>\n' "$(deployment_timing_summary)"
   deployment_commit_messages
 }
 
 on_deploy_error() {
   status="$?"
-  notify_telegram "❌ <b>${APP_DISPLAY_NAME} <code>v${APP_VERSION}</code> deployment failed</b>\nStatus: <code>${status}</code>\n$(deployment_metadata_summary)" false
+  notify_telegram "❌ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} <code>v${APP_VERSION}</code> deployment failed</b>\nStatus: <code>${status}</code>\n$(deployment_metadata_summary)" false
   exit "${status}"
 }
 
@@ -170,5 +190,5 @@ fi
 
 systemctl restart "${SERVICE_NAME}@blue.service" || systemctl restart "${SERVICE_NAME}.service"
 
-notify_telegram "✅ <b>${APP_DISPLAY_NAME} <code>v${APP_VERSION}</code> deployment complete</b>\n$(deployment_metadata_summary)" true
+notify_telegram "✅ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} <code>v${APP_VERSION}</code> deployment passed</b>\n$(deployment_metadata_summary)" true
 trap - ERR
