@@ -34,6 +34,7 @@ fi
 install -m 700 -d ~/.ssh
 printf '%s\n' "$CI_CD_DEPLOY_SSH_PRIVATE_KEY" > ~/.ssh/gitlab_ci_cd_deploy_key
 chmod 600 ~/.ssh/gitlab_ci_cd_deploy_key
+ssh-keyscan -H "$CI_CD_DEPLOY_SSH_HOST" >> ~/.ssh/known_hosts
 
 export CI_CD_RELEASE_ID="$(cat _build/RELEASE_ID)"
 export CI_CD_RELEASE_VERSION="$(cat _build/VERSION)"
