@@ -1,6 +1,6 @@
 variables:
   CI_CD_HARNESS_PROJECT: "olivierg/gitlab-ci-cd-harness"
-  CI_CD_HARNESS_REF: "v0.2.21"
+  CI_CD_HARNESS_REF: "v0.2.22"
   CI_CD_ENABLE_STAGING_DEPLOY: "true"
   CI_CD_ENABLE_PROD_DEPLOY: "false"
   CI_CD_ENABLE_ANSIBLE_DEPLOY_JOBS: "false"
@@ -51,18 +51,6 @@ variables:
       date -u -d "$1" +%s 2>/dev/null || true
     }
 
-    job_metadata_field() {
-      local field="$1"
-
-      if [ -z "${CI_API_V4_URL:-}" ] || [ -z "${CI_PROJECT_ID:-}" ] || [ -z "${CI_JOB_ID:-}" ] || [ -z "${CI_JOB_TOKEN:-}" ]; then
-        return 0
-      fi
-
-      curl -fsS --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
-        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/jobs/${CI_JOB_ID}" 2>/dev/null |
-        python3 -c 'import json, sys; value = json.load(sys.stdin).get(sys.argv[1]); print(value) if value else None' "$field" || true
-    }
-
     duration_label() {
       local seconds="$1"
 
@@ -83,13 +71,6 @@ variables:
     job_created_at="${CI_JOB_CREATED_AT:-}"
     job_started_at="${CI_JOB_STARTED_AT:-}"
 
-    if [ -z "$job_created_at" ]; then
-      job_created_at="$(job_metadata_field created_at)"
-    fi
-    if [ -z "$job_started_at" ]; then
-      job_started_at="$(job_metadata_field started_at)"
-    fi
-
     if [ -n "$job_started_at" ]; then
       job_start_epoch="$(seconds_from_timestamp "$job_started_at")"
     fi
@@ -109,6 +90,10 @@ variables:
       if [ -n "${pipeline_created_epoch:-}" ]; then
         total_seconds="$(($(date -u +%s) - pipeline_created_epoch))"
       fi
+    fi
+
+    if [ "$wait_seconds" = "unknown" ] && [ -n "${job_start_epoch:-}" ] && [ -n "${pipeline_created_epoch:-}" ]; then
+      wait_seconds="$((job_start_epoch - pipeline_created_epoch))"
     fi
 
     html_escape() {
