@@ -13,10 +13,10 @@ Update GitLab includes:
 ```yaml
 include:
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.8"
+    ref: "v0.2.9"
     file: "/templates/acceptance.yml"
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.8"
+    ref: "v0.2.9"
     file: "/templates/cd.yml"
 ```
 
@@ -77,6 +77,7 @@ from `CI_CD_OTP_APP`, so `CI_CD_OTP_APP: "agile_u"` produces:
 
 ```text
 AGILE_U_APP_VERSION
+AGILE_U_APP_NAME
 AGILE_U_GIT_SHA
 AGILE_U_GIT_REF
 AGILE_U_GIT_SUBJECT

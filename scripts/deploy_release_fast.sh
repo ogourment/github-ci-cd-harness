@@ -180,11 +180,13 @@ remote_deploy_command() {
   git_messages="$(commit_messages)"
   git_messages_env="${git_messages//$'\n'/\\n}"
   deploy_actor="${GITLAB_USER_LOGIN:-gitlab-ci}"
+  deploy_app_name="${CI_CD_APP_NAME:-${ACCEPTANCE_APP_NAME:-${CI_PROJECT_TITLE:-$CI_CD_OTP_APP}}}"
   ci_job_wait_seconds="$(job_wait_seconds || true)"
   ci_pipeline_created_epoch="$(pipeline_created_epoch || true)"
 
   command=(
     sudo env
+    "$(remote_env_assignment "${remote_env_prefix}_APP_NAME" "$deploy_app_name")"
     "$(remote_env_assignment "${remote_env_prefix}_APP_VERSION" "$version")"
     "$(remote_env_assignment "${remote_env_prefix}_GIT_SHA" "$git_sha")"
     "$(remote_env_assignment "${remote_env_prefix}_GIT_REF" "$git_ref")"

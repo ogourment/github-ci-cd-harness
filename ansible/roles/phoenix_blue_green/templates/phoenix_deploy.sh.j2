@@ -42,6 +42,7 @@ metadata_value() {
   fi
 }
 
+APP_DISPLAY_NAME="$(metadata_value APP_NAME "${APP_NAME}")"
 APP_VERSION="$(metadata_value APP_VERSION unknown)"
 GIT_SUBJECT="$(metadata_value GIT_SUBJECT unknown)"
 GIT_MESSAGES="$(metadata_value GIT_MESSAGES "${GIT_SUBJECT}")"
@@ -95,7 +96,7 @@ deployment_metadata_summary() {
 
 on_deploy_error() {
   status="$?"
-  notify_telegram "❌ <b>[${DEPLOY_ENV}] deployment failed v${APP_VERSION}</b>
+  notify_telegram "❌ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} deployment failed v${APP_VERSION}</b>
 actor=${ACTOR:-unknown} release=${RELEASE_ID:-unknown} status=${status} pipeline=${CI_PIPELINE_ID:-unknown} job=${CI_JOB_ID:-unknown} $(deployment_timing_summary)" false
   exit "${status}"
 }
@@ -133,6 +134,6 @@ fi
 
 systemctl restart "${SERVICE_NAME}@blue.service" || systemctl restart "${SERVICE_NAME}.service"
 
-notify_telegram "✅ <b>[${DEPLOY_ENV}] deployment complete v${APP_VERSION}</b>
+notify_telegram "✅ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} deployment complete v${APP_VERSION}</b>
 $(deployment_metadata_summary)" true
 trap - ERR
