@@ -7,7 +7,16 @@ target="${1:?target required}"
 : "${CI_CD_DEPLOY_SSH_PRIVATE_KEY:?CI_CD_DEPLOY_SSH_PRIVATE_KEY is required}"
 : "${CI_CD_RELEASE_ARTIFACT_KIND:=directory}"
 : "${CI_CD_RELEASE_ARTIFACT_PATH:=_build/prod/rel/${CI_CD_OTP_APP}}"
-: "${CI_CD_DEPLOY_SSH_HOST:=${CI_CD_DEPLOY_HOST}}"
+
+CI_CD_DEPLOY_HOST="${CI_CD_DEPLOY_HOST:-}"
+CI_CD_DEPLOY_SSH_HOST="${CI_CD_DEPLOY_SSH_HOST:-$CI_CD_DEPLOY_HOST}"
+
+if [ -z "${CI_CD_DEPLOY_SSH_HOST}" ]; then
+  echo "CI_CD_DEPLOY_SSH_HOST or CI_CD_DEPLOY_HOST is required" >&2
+  exit 2
+fi
+
+CI_CD_DEPLOY_SSH_USER="${CI_CD_DEPLOY_SSH_USER:-deploy}"
 
 CI_CD_DEPLOY_INVENTORY_FILE="${CI_CD_ANSIBLE_INVENTORY:-}"
 ansible_inventory_tmp=""

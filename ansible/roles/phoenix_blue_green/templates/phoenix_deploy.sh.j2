@@ -153,7 +153,7 @@ deployment_metadata_summary() {
 
 on_deploy_error() {
   status="$?"
-  notify_telegram "❌ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} <code>v${APP_VERSION}</code> deployment failed</b>\nStatus: <code>${status}</code>\n$(deployment_metadata_summary)" false
+  notify_telegram "❌ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} <code>v${APP_VERSION}</code> failed</b>\nStatus: <code>${status}</code>\n$(deployment_metadata_summary)" false
   exit "${status}"
 }
 
@@ -190,5 +190,5 @@ fi
 
 systemctl restart "${SERVICE_NAME}@blue.service" || systemctl restart "${SERVICE_NAME}.service"
 
-notify_telegram "✅ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} <code>v${APP_VERSION}</code> deployment passed</b>\n$(deployment_metadata_summary)" true
+notify_telegram "✅ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} <code>v${APP_VERSION}</code> passed</b>\n$(deployment_metadata_summary)" true
 trap - ERR
