@@ -94,11 +94,37 @@ acceptance_evidence:
       else
         acceptance_report_url="${CI_JOB_URL}/artifacts/file/${ACCEPTANCE_PUBLIC_DIR%/}/index.html"
       fi
+      acceptance_report_base_url="${acceptance_report_url%/}"
+      acceptance_report_base_url="${acceptance_report_base_url%/index.html}"
+
+      acceptance_live_evidence_url=""
+      if [ -n "${ACCEPTANCE_LIVE_EVIDENCE_COMMAND:-}" ]; then
+        export ACCEPTANCE_REPORT_URL="$acceptance_report_url"
+        export ACCEPTANCE_REPORT_BASE_URL="$acceptance_report_base_url"
+        export ACCEPTANCE_EVIDENCE_JSON_PATH="${ACCEPTANCE_EVIDENCE_DIR%/}/evidence.json"
+
+        set +e
+        acceptance_live_evidence_output="$(bash -lc "$ACCEPTANCE_LIVE_EVIDENCE_COMMAND" 2>&1)"
+        acceptance_live_evidence_status="$?"
+        set -e
+
+        if [ "$acceptance_live_evidence_status" -eq 0 ]; then
+          acceptance_live_evidence_url="$(printf '%s\n' "$acceptance_live_evidence_output" | sed '/^[[:space:]]*$/d' | tail -n 1)"
+        else
+          {
+            echo "acceptance live evidence command failed with status ${acceptance_live_evidence_status}"
+            printf '%s\n' "$acceptance_live_evidence_output"
+          } > "${ACCEPTANCE_EVIDENCE_DIR%/}/live_evidence_error.txt"
+        fi
+      fi
 
       {
         echo "${atdd_status_icon} <b>[acceptance] ${ACCEPTANCE_APP_NAME} <code>v${app_version}</code> ${atdd_status_word}</b>"
         echo "Pipeline: <code>${CI_PIPELINE_ID}</code> job <code>${CI_JOB_ID}</code>"
         echo "Evidence report: <a href=\"${acceptance_report_url}\">open report</a>"
+        if [ -n "$acceptance_live_evidence_url" ]; then
+          echo "Live evidence: <a href=\"${acceptance_live_evidence_url}\">open latest live evidence</a>"
+        fi
         echo "Evidence: ${atdd_scenarios} scenario(s), ${atdd_steps} step(s)"
         echo "Exit: test <code>${ACCEPTANCE_TEST_EXIT_CODE}</code>, gate <code>${ACCEPTANCE_GATE_EXIT_CODE}</code>"
         echo "Finished in <code>${atdd_minutes}m ${atdd_seconds}s</code>."
