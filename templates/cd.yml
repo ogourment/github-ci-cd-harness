@@ -1,6 +1,6 @@
 variables:
   CI_CD_HARNESS_PROJECT: "olivierg/gitlab-ci-cd-harness"
-  CI_CD_HARNESS_REF: "v0.2.20"
+  CI_CD_HARNESS_REF: "v0.2.21"
   CI_CD_ENABLE_STAGING_DEPLOY: "true"
   CI_CD_ENABLE_PROD_DEPLOY: "false"
   CI_CD_ENABLE_ANSIBLE_DEPLOY_JOBS: "false"
@@ -60,20 +60,7 @@ variables:
 
       curl -fsS --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
         "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/jobs/${CI_JOB_ID}" 2>/dev/null |
-        python3 -c '
-import json
-import sys
-
-field = sys.argv[1]
-try:
-    payload = json.load(sys.stdin)
-except Exception:
-    raise SystemExit(0)
-
-value = payload.get(field)
-if value:
-    print(value)
-' "$field" || true
+        python3 -c 'import json, sys; value = json.load(sys.stdin).get(sys.argv[1]); print(value) if value else None' "$field" || true
     }
 
     duration_label() {
