@@ -97,26 +97,40 @@ acceptance_evidence:
       acceptance_report_base_url="${acceptance_report_url%/}"
       acceptance_report_base_url="${acceptance_report_base_url%/index.html}"
 
+      acceptance_live_evidence_status="disabled"
       acceptance_live_evidence_url=""
       if [ -n "${ACCEPTANCE_LIVE_EVIDENCE_COMMAND:-}" ]; then
+        acceptance_live_evidence_status="running"
         export ACCEPTANCE_REPORT_URL="$acceptance_report_url"
         export ACCEPTANCE_REPORT_BASE_URL="$acceptance_report_base_url"
         export ACCEPTANCE_EVIDENCE_JSON_PATH="${ACCEPTANCE_EVIDENCE_DIR%/}/evidence.json"
 
         set +e
         acceptance_live_evidence_output="$(bash -lc "$ACCEPTANCE_LIVE_EVIDENCE_COMMAND" 2>&1)"
-        acceptance_live_evidence_status="$?"
+        acceptance_live_evidence_exit_code="$?"
         set -e
 
-        if [ "$acceptance_live_evidence_status" -eq 0 ]; then
+        if [ "$acceptance_live_evidence_exit_code" -eq 0 ]; then
           acceptance_live_evidence_url="$(printf '%s\n' "$acceptance_live_evidence_output" | sed '/^[[:space:]]*$/d' | tail -n 1)"
+          if printf '%s' "$acceptance_live_evidence_url" | grep -Eq '^https?://'; then
+            acceptance_live_evidence_status="ok"
+          else
+            acceptance_live_evidence_status="empty"
+            acceptance_live_evidence_url=""
+            {
+              echo "acceptance live evidence command completed but did not print an absolute URL"
+              printf '%s\n' "$acceptance_live_evidence_output"
+            } > "${ACCEPTANCE_EVIDENCE_DIR%/}/live_evidence_error.txt"
+          fi
         else
+          acceptance_live_evidence_status="failed"
           {
-            echo "acceptance live evidence command failed with status ${acceptance_live_evidence_status}"
+            echo "acceptance live evidence command failed with status ${acceptance_live_evidence_exit_code}"
             printf '%s\n' "$acceptance_live_evidence_output"
           } > "${ACCEPTANCE_EVIDENCE_DIR%/}/live_evidence_error.txt"
         fi
       fi
+      printf 'ACCEPTANCE_LIVE_EVIDENCE_STATUS=%s\n' "$acceptance_live_evidence_status" >> "$ACCEPTANCE_EVIDENCE_DIR/status.env"
 
       {
         echo "${atdd_status_icon} <b>[acceptance] ${ACCEPTANCE_APP_NAME} <code>v${app_version}</code> ${atdd_status_word}</b>"
