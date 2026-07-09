@@ -159,7 +159,12 @@ build_release:
     - when: never
   before_script:
     - apt-get update -y
-    - apt-get install -y --no-install-recommends build-essential git curl rsync nodejs npm
+    - apt-get install -y --no-install-recommends build-essential git curl rsync
+    # Some CI images already bundle Node.js (e.g. via NodeSource); Debian's
+    # own nodejs/npm packages conflict with that (NodeSource's nodejs
+    # package bundles npm and Conflicts: npm), so only apt-get install them
+    # when the image doesn't already have a `node` on PATH.
+    - command -v node >/dev/null 2>&1 || apt-get install -y --no-install-recommends nodejs npm
     - mix local.hex --force
     - mix local.rebar --force
   script:
