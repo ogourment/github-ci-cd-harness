@@ -104,9 +104,13 @@ acceptance_evidence:
         export ACCEPTANCE_REPORT_URL="$acceptance_report_url"
         export ACCEPTANCE_REPORT_BASE_URL="$acceptance_report_base_url"
         export ACCEPTANCE_EVIDENCE_JSON_PATH="${ACCEPTANCE_EVIDENCE_DIR%/}/evidence.json"
+        acceptance_live_evidence_command="$ACCEPTANCE_LIVE_EVIDENCE_COMMAND"
+        acceptance_live_evidence_command="${acceptance_live_evidence_command//\{\{ACCEPTANCE_REPORT_URL\}\}/$ACCEPTANCE_REPORT_URL}"
+        acceptance_live_evidence_command="${acceptance_live_evidence_command//\{\{ACCEPTANCE_REPORT_BASE_URL\}\}/$ACCEPTANCE_REPORT_BASE_URL}"
+        acceptance_live_evidence_command="${acceptance_live_evidence_command//\{\{ACCEPTANCE_EVIDENCE_JSON_PATH\}\}/$ACCEPTANCE_EVIDENCE_JSON_PATH}"
 
         set +e
-        acceptance_live_evidence_output="$(bash -lc "$ACCEPTANCE_LIVE_EVIDENCE_COMMAND" 2>&1)"
+        acceptance_live_evidence_output="$(bash -lc "$acceptance_live_evidence_command" 2>&1)"
         acceptance_live_evidence_exit_code="$?"
         set -e
 
