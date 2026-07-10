@@ -9,6 +9,11 @@ env_dir="${ATDD_REMOTE_ENV_DIR:-${ACCEPTANCE_REMOTE_ENV_DIR:-/etc/${app_name}}}"
 env_file="${ATDD_REMOTE_ENV_FILE:-${ACCEPTANCE_REMOTE_ENV_FILE:-${env_dir}/${app_name}.env}}"
 app_user="${ATDD_REMOTE_APP_USER:-${ACCEPTANCE_REMOTE_APP_USER:-${app_name}}}"
 slot_file="${ATDD_REMOTE_SLOT_FILE:-${app_root}/ACTIVE_SLOT}"
+# Hosts with a different slot layout (e.g. blue/green colors living directly
+# under the app root, per-color env files under /etc/default) override these
+# patterns; {{slot}} is replaced with the slot file's content on the host.
+slot_dir_pattern="${ATDD_REMOTE_SLOT_DIR_PATTERN:-${ACCEPTANCE_REMOTE_SLOT_DIR_PATTERN:-${app_root}/slots/{{slot}}}}"
+slot_env_pattern="${ATDD_REMOTE_SLOT_ENV_PATTERN:-${ACCEPTANCE_REMOTE_SLOT_ENV_PATTERN:-${env_dir}/${app_name}-{{slot}}.env}}"
 
 if [[ -z "${app_name}" ]]; then
   echo "ATDD remote app name is required; set ATDD_REMOTE_APP_NAME or ACCEPTANCE_APP_OTP_NAME" >&2
@@ -69,6 +74,8 @@ ssh "${ssh_opts[@]}" "${user}@${host}" \
   ATDD_APP_USER="${app_user}" \
   ATDD_APP_NAME="${app_name}" \
   ATDD_SLOT_FILE="${slot_file}" \
+  ATDD_SLOT_DIR_PATTERN="${slot_dir_pattern}" \
+  ATDD_SLOT_ENV_PATTERN="${slot_env_pattern}" \
   'bash -s' <<'REMOTE'
 set -euo pipefail
 
@@ -79,12 +86,19 @@ slot_env=""
 
 if [[ -f "${ATDD_SLOT_FILE}" ]]; then
   slot="$(cat "${ATDD_SLOT_FILE}")"
-  release_dir="${ATDD_APP_ROOT}/slots/${slot}"
-  slot_env="${ATDD_ENV_DIR}/${ATDD_APP_NAME}-${slot}.env"
+  release_dir="${ATDD_SLOT_DIR_PATTERN//\{\{slot\}\}/${slot}}"
+  slot_env="${ATDD_SLOT_ENV_PATTERN//\{\{slot\}\}/${slot}}"
 fi
 
-sudo -u "${ATDD_APP_USER}" \
-  env \
+run_as_app_user() {
+  if [[ "$(id -un)" == "${ATDD_APP_USER}" ]]; then
+    env "$@"
+  else
+    sudo -u "${ATDD_APP_USER}" env "$@"
+  fi
+}
+
+run_as_app_user \
     ATDD_EVAL_EXPR="${expr}" \
     ATDD_APP_ROOT="${ATDD_APP_ROOT}" \
     ATDD_ENV_DIR="${ATDD_ENV_DIR}" \
@@ -96,7 +110,9 @@ sudo -u "${ATDD_APP_USER}" \
   bash -lc '
     set -euo pipefail
     set -a
-    source "${ATDD_ENV_FILE}"
+    if [[ -f "${ATDD_ENV_FILE}" ]]; then
+      source "${ATDD_ENV_FILE}"
+    fi
     if [[ -n "${ATDD_SLOT_ENV_FILE}" && -f "${ATDD_SLOT_ENV_FILE}" ]]; then
       source "${ATDD_SLOT_ENV_FILE}"
     fi
