@@ -12,8 +12,17 @@ slot_file="${ATDD_REMOTE_SLOT_FILE:-${app_root}/ACTIVE_SLOT}"
 # Hosts with a different slot layout (e.g. blue/green colors living directly
 # under the app root, per-color env files under /etc/default) override these
 # patterns; {{slot}} is replaced with the slot file's content on the host.
-slot_dir_pattern="${ATDD_REMOTE_SLOT_DIR_PATTERN:-${ACCEPTANCE_REMOTE_SLOT_DIR_PATTERN:-${app_root}/slots/{{slot}}}}"
-slot_env_pattern="${ATDD_REMOTE_SLOT_ENV_PATTERN:-${ACCEPTANCE_REMOTE_SLOT_ENV_PATTERN:-${env_dir}/${app_name}-{{slot}}.env}}"
+# The literal-brace defaults are assigned separately: inside ${var:-default}
+# bash closes the expansion on the default's own braces.
+slot_dir_pattern="${ATDD_REMOTE_SLOT_DIR_PATTERN:-${ACCEPTANCE_REMOTE_SLOT_DIR_PATTERN:-}}"
+if [[ -z "${slot_dir_pattern}" ]]; then
+  slot_dir_pattern="${app_root}/slots/{{slot}}"
+fi
+
+slot_env_pattern="${ATDD_REMOTE_SLOT_ENV_PATTERN:-${ACCEPTANCE_REMOTE_SLOT_ENV_PATTERN:-}}"
+if [[ -z "${slot_env_pattern}" ]]; then
+  slot_env_pattern="${env_dir}/${app_name}-{{slot}}.env"
+fi
 
 if [[ -z "${app_name}" ]]; then
   echo "ATDD remote app name is required; set ATDD_REMOTE_APP_NAME or ACCEPTANCE_APP_OTP_NAME" >&2
