@@ -86,8 +86,10 @@ slot_env=""
 
 if [[ -f "${ATDD_SLOT_FILE}" ]]; then
   slot="$(cat "${ATDD_SLOT_FILE}")"
-  release_dir="${ATDD_SLOT_DIR_PATTERN//\{\{slot\}\}/${slot}}"
-  slot_env="${ATDD_SLOT_ENV_PATTERN//\{\{slot\}\}/${slot}}"
+  # sed rather than ${var//…}: literal braces inside a brace-pattern
+  # substitution parse ambiguously across bash versions.
+  release_dir="$(printf '%s' "${ATDD_SLOT_DIR_PATTERN}" | sed "s|{{slot}}|${slot}|g")"
+  slot_env="$(printf '%s' "${ATDD_SLOT_ENV_PATTERN}" | sed "s|{{slot}}|${slot}|g")"
 fi
 
 run_as_app_user() {
