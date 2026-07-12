@@ -71,7 +71,7 @@ acceptance_evidence:
       if [ -s "$ACCEPTANCE_EVIDENCE_DIR/failure_count.txt" ]; then
         atdd_failure_count="$(cat "$ACCEPTANCE_EVIDENCE_DIR/failure_count.txt")"
       elif [ -s "$acceptance_test_log" ]; then
-        atdd_failure_count="$(grep -Eo '[0-9]+ failures?' "$acceptance_test_log" | head -n 1 | sed -E 's/[^0-9]//g')"
+        atdd_failure_count="$(grep -Eo '[0-9]+ failures?' "$acceptance_test_log" | head -n 1 | sed -E 's/[^0-9]//g' || true)"
         atdd_failure_count="${atdd_failure_count:-0}"
       fi
 
