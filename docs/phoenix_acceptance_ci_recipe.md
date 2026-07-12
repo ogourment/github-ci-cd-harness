@@ -17,7 +17,7 @@ Acceptance evidence must be published even when the browser tests fail. Producti
 ```yaml
 include:
   - project: "olivierg/gitlab-ci-cd-harness"
-    ref: "v0.2.12"
+    ref: "v0.3.0"
     file: "/templates/acceptance.yml"
 ```
 
@@ -201,8 +201,9 @@ The generated message starts with a status icon and includes:
 - evidence report link
 - scenario and step counts
 - test and gate exit codes
+- failure count
 - elapsed time
-- first failure summary when present
+- failure count on the Exit line
 
 Example shape:
 
@@ -211,7 +212,7 @@ Example shape:
 Pipeline: `123456` job `789`
 Evidence report: open report
 Evidence: 9 scenario(s), 42 step(s)
-Exit: test `0`, gate `0`
+Exit: test `0`, gate `0`, failures `0`
 Finished in `5m 12s`.
 ```
 
@@ -265,7 +266,7 @@ The runner should orchestrate the browser and evidence collection. Staging shoul
 - `mix test.atdd` exists and runs only acceptance scenarios.
 - Evidence paths are configured under `tmp/atdd`.
 - Scenarios call `record_pending_step/4` before fragile assertions.
-- `gitlab-ci-cd-harness@v0.2.12` is included.
+- `gitlab-ci-cd-harness@v0.3.0` is included.
 - `acceptance_evidence` sets app name, target, base URL, evidence dir, public dir, and test command.
 - `acceptance_gate` is required by `deploy_prod`.
 - Evidence publishing runs even on failed acceptance.

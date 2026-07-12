@@ -47,6 +47,8 @@ acceptance_evidence:
 
       if [ "$ACCEPTANCE_TEST_EXIT_CODE" -ne 0 ]; then
         MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.append_failures "$acceptance_test_log" \
+          "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" "$ACCEPTANCE_EVIDENCE_DIR/failure_count.txt" "$ACCEPTANCE_EVIDENCE_DIR/failure_previews.json" || \
+        MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.append_failures "$acceptance_test_log" \
           "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt" || true
       fi
 
@@ -65,9 +67,12 @@ acceptance_evidence:
 
       atdd_scenarios=$(grep -E '^\|[[:space:]]*[0-9]+[[:space:]]*\|' "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" | wc -l || true)
       atdd_steps=$(grep -Ec '^###[[:space:]]+' "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" || true)
-      atdd_first_failure=""
-      if [ -s "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt" ]; then
-        atdd_first_failure="$(head -n 1 "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt")"
+      atdd_failure_count="0"
+      if [ -s "$ACCEPTANCE_EVIDENCE_DIR/failure_count.txt" ]; then
+        atdd_failure_count="$(cat "$ACCEPTANCE_EVIDENCE_DIR/failure_count.txt")"
+      elif [ -s "$acceptance_test_log" ]; then
+        atdd_failure_count="$(grep -Eo '[0-9]+ failures?' "$acceptance_test_log" | head -n 1 | sed -E 's/[^0-9]//g')"
+        atdd_failure_count="${atdd_failure_count:-0}"
       fi
 
       if [ "$ACCEPTANCE_GATE_EXIT_CODE" -eq 0 ]; then
@@ -144,11 +149,8 @@ acceptance_evidence:
           echo "Live evidence: <a href=\"${acceptance_live_evidence_url}\">open latest live evidence</a>"
         fi
         echo "Evidence: ${atdd_scenarios} scenario(s), ${atdd_steps} step(s)"
-        echo "Exit: test <code>${ACCEPTANCE_TEST_EXIT_CODE}</code>, gate <code>${ACCEPTANCE_GATE_EXIT_CODE}</code>"
+        echo "Exit: test <code>${ACCEPTANCE_TEST_EXIT_CODE}</code>, gate <code>${ACCEPTANCE_GATE_EXIT_CODE}</code>, failures <code>${atdd_failure_count}</code>"
         echo "Finished in <code>${atdd_minutes}m ${atdd_seconds}s</code>."
-        if [ -n "$atdd_first_failure" ]; then
-          echo "First failure: ${atdd_first_failure}"
-        fi
       } > "$acceptance_message_path"
 
       if [ "${ACCEPTANCE_TEST_EXIT_CODE}" -ne 0 ] && [ -f "$ACCEPTANCE_EVIDENCE_DIR/gate_check.txt" ]; then
