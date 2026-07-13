@@ -6,7 +6,7 @@ variables:
   CI_CD_ENABLE_ANSIBLE_DEPLOY_JOBS: "false"
   CI_CD_ENABLE_RELEASE_TAG: "false"
   CI_CD_RELEASE_TAG_PREFIX: "v"
-  CI_CD_RELEASE_VERSION_COMMAND: "awk -F'\"' '/^[[:space:]]*version:/ { print $2; exit }' mix.exs"
+  CI_CD_RELEASE_VERSION_COMMAND: 'sed -nE ''s/^[[:space:]]*version:[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p'' mix.exs | head -n 1'
   CI_CD_RUN_MIGRATIONS: "migrate"
   CI_CD_RELEASE_ARTIFACT_KIND: "directory"
   CI_CD_REMOTE_RELEASES_ROOT: "/home/deploy/releases"
