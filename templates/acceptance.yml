@@ -17,6 +17,7 @@ acceptance_evidence:
       : "${ACCEPTANCE_MIX_ENV:=test}"
       : "${ACCEPTANCE_EVIDENCE_DIR:=tmp/atdd}"
       : "${ACCEPTANCE_PUBLIC_DIR:=public}"
+      : "${ACCEPTANCE_SITE_TIMEOUT_SECONDS:=90}"
       : "${ACCEPTANCE_FORCE_FAILURE:=false}"
       : "${ACCEPTANCE_FORCE_FAILURE_CODE:=42}"
       : "${ACCEPTANCE_TELEGRAM_MESSAGE_PATH:=acceptance_summary.txt}"
@@ -52,7 +53,18 @@ acceptance_evidence:
           "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt" || true
       fi
 
-      MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.site "$ACCEPTANCE_EVIDENCE_DIR" "$ACCEPTANCE_PUBLIC_DIR"
+      acceptance_site_log="$ACCEPTANCE_EVIDENCE_DIR/site_build.log"
+      echo "===== acceptance.site (timeout: ${ACCEPTANCE_SITE_TIMEOUT_SECONDS}s) ====="
+      set +e
+      timeout -k 10s "$ACCEPTANCE_SITE_TIMEOUT_SECONDS" env MIX_ENV="$ACCEPTANCE_MIX_ENV" \
+        mix acceptance.site "$ACCEPTANCE_EVIDENCE_DIR" "$ACCEPTANCE_PUBLIC_DIR" 2>&1 | tee "$acceptance_site_log"
+      ACCEPTANCE_SITE_EXIT_CODE="${PIPESTATUS[0]:-1}"
+      set -e
+      printf 'ACCEPTANCE_SITE_EXIT_CODE=%s\n' "$ACCEPTANCE_SITE_EXIT_CODE" >> "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+
+      if [ "$ACCEPTANCE_SITE_EXIT_CODE" -ne 0 ]; then
+        echo "acceptance.site failed with exit code $ACCEPTANCE_SITE_EXIT_CODE; see $acceptance_site_log"
+      fi
 
       set +e
       MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.gate "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" \
@@ -75,7 +87,7 @@ acceptance_evidence:
         atdd_failure_count="${atdd_failure_count:-0}"
       fi
 
-      if [ "$ACCEPTANCE_GATE_EXIT_CODE" -eq 0 ]; then
+      if [ "$ACCEPTANCE_TEST_EXIT_CODE" -eq 0 ] && [ "$ACCEPTANCE_SITE_EXIT_CODE" -eq 0 ] && [ "$ACCEPTANCE_GATE_EXIT_CODE" -eq 0 ]; then
         atdd_status_icon="✅"
         atdd_status_word="passed"
       else
@@ -149,7 +161,7 @@ acceptance_evidence:
           echo "Live evidence: <a href=\"${acceptance_live_evidence_url}\">open latest live evidence</a>"
         fi
         echo "Evidence: ${atdd_scenarios} scenario(s), ${atdd_steps} step(s)"
-        echo "Exit: test <code>${ACCEPTANCE_TEST_EXIT_CODE}</code>, gate <code>${ACCEPTANCE_GATE_EXIT_CODE}</code>, failures <code>${atdd_failure_count}</code>"
+        echo "Exit: test <code>${ACCEPTANCE_TEST_EXIT_CODE}</code>, site <code>${ACCEPTANCE_SITE_EXIT_CODE}</code>, gate <code>${ACCEPTANCE_GATE_EXIT_CODE}</code>, failures <code>${atdd_failure_count}</code>"
         echo "Finished in <code>${atdd_minutes}m ${atdd_seconds}s</code>."
       } > "$acceptance_message_path"
 
@@ -162,6 +174,10 @@ acceptance_evidence:
 
       cat "$ACCEPTANCE_EVIDENCE_DIR/status.env"
       find "$ACCEPTANCE_EVIDENCE_DIR" -maxdepth 3 -type f | sort
+
+      if [ "$ACCEPTANCE_SITE_EXIT_CODE" -ne 0 ]; then
+        exit "$ACCEPTANCE_SITE_EXIT_CODE"
+      fi
   artifacts:
     when: always
     paths:
@@ -220,7 +236,7 @@ acceptance_notify:
       fi
 
       acceptance_notify_silent=false
-      if [ "${ATDD_TEST_EXIT_CODE:-1}" = "0" ] && [ "${ATDD_GATE_EXIT_CODE:-1}" = "0" ]; then
+      if [ "${ATDD_TEST_EXIT_CODE:-1}" = "0" ] && [ "${ACCEPTANCE_SITE_EXIT_CODE:-1}" = "0" ] && [ "${ATDD_GATE_EXIT_CODE:-1}" = "0" ]; then
         acceptance_notify_silent=true
       fi
 

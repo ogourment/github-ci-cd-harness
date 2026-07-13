@@ -106,6 +106,7 @@ variables:
   ACCEPTANCE_TEST_COMMAND: "mix test.atdd"
   ACCEPTANCE_EVIDENCE_DIR: "tmp/atdd"
   ACCEPTANCE_PUBLIC_DIR: "public"
+  ACCEPTANCE_SITE_TIMEOUT_SECONDS: "90"
 ```
 
 ## Optional variables
@@ -123,6 +124,7 @@ variables:
   ACCEPTANCE_REMOTE_SSH_KEY_FILE: ""
   ACCEPTANCE_FORCE_FAILURE: "false"
   ACCEPTANCE_FORCE_FAILURE_CODE: "42"
+  ACCEPTANCE_SITE_TIMEOUT_SECONDS: "90"              # hard cap for `mix acceptance.site`; its log is retained in the evidence artifact
 ```
 
 `ACCEPTANCE_TELEGRAM_MESSAGE_PATH` is interpreted as a filename relative to
