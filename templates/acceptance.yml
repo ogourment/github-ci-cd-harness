@@ -64,6 +64,9 @@ acceptance_evidence:
 
       if [ "$ACCEPTANCE_SITE_EXIT_CODE" -ne 0 ]; then
         echo "acceptance.site failed with exit code $ACCEPTANCE_SITE_EXIT_CODE; see $acceptance_site_log"
+        cat "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+        find "$ACCEPTANCE_EVIDENCE_DIR" -maxdepth 3 -type f | sort
+        exit "$ACCEPTANCE_SITE_EXIT_CODE"
       fi
 
       set +e
@@ -175,9 +178,6 @@ acceptance_evidence:
       cat "$ACCEPTANCE_EVIDENCE_DIR/status.env"
       find "$ACCEPTANCE_EVIDENCE_DIR" -maxdepth 3 -type f | sort
 
-      if [ "$ACCEPTANCE_SITE_EXIT_CODE" -ne 0 ]; then
-        exit "$ACCEPTANCE_SITE_EXIT_CODE"
-      fi
   artifacts:
     when: always
     paths:
