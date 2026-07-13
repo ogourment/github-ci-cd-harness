@@ -1,0 +1,15 @@
+include:
+  - local: "/templates/cd.yml"
+
+stages:
+  - build
+  - deploy
+  - production
+
+default:
+  image: debian:bookworm-slim
+
+variables:
+  CI_CD_ENABLE_STAGING_DEPLOY: "false"
+  CI_CD_ENABLE_RELEASE_TAG: "true"
+  CI_CD_RELEASE_VERSION_COMMAND: "cat VERSION"

@@ -33,6 +33,7 @@ Phoenix release.
 `templates/cd.yml` defines:
 
 - `build_release`
+- `release_tag` (off by default; manual)
 - `deploy_staging`
 - `deploy_prod` (off by default)
 - `deploy_staging_ansible` (off by default)
@@ -47,6 +48,20 @@ build_release -> deploy_staging -> acceptance_evidence -> acceptance_gate -> dep
 Production deploys remain optional. Set `CI_CD_ENABLE_PROD_DEPLOY=true` in a
 consumer to expose the manual production deploy job. Optional manual deploy
 jobs are non-blocking, so a green pipeline stays green when they are not run.
+
+## SemVer release tags
+
+Set `CI_CD_ENABLE_RELEASE_TAG=true` to expose the `release_tag` manual job on
+`main`. It evaluates `CI_CD_RELEASE_VERSION_COMMAND` (by default, the
+`version:` value in `mix.exs`), requires strict `MAJOR.MINOR.PATCH` SemVer, and
+creates an annotated `vMAJOR.MINOR.PATCH` tag at the current pipeline commit.
+It refuses to replace an existing tag.
+
+The consumer project must enable **Allow Git push requests to the repository**
+for its own CI/CD job tokens. The job token uses the permissions of the person
+who starts the manual job, so protect `v*` tags and restrict tag creation to
+Maintainers in the project settings. GitLab does not create another pipeline
+for the tag push.
 
 ## Required consumer configuration
 
