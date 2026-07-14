@@ -225,7 +225,7 @@
 - name: Install sshd hardening drop-in
   ansible.builtin.template:
     src: sshd_hardening.conf.j2
-    dest: /etc/ssh/sshd_config.d/00-harness-hardening.conf
+    dest: "{{ ssh_hardening_config_path }}"
     mode: "0644"
   notify: Restart ssh
 
@@ -248,14 +248,14 @@
 - name: Cap journald disk usage
   ansible.builtin.template:
     src: journald.conf.j2
-    dest: /etc/systemd/journald.conf.d/harness.conf
+    dest: "{{ journald_config_path }}"
     mode: "0644"
   notify: Restart journald
 
 - name: Install Fail2ban honeypot filter
   ansible.builtin.template:
     src: honeypot.conf.j2
-    dest: "/etc/fail2ban/filter.d/{{ fail2ban_honeypot_name }}.conf"
+    dest: "{{ fail2ban_honeypot_filter_path }}"
     mode: "0644"
   notify: Restart fail2ban
   when: fail2ban_honeypot_enabled
@@ -263,7 +263,7 @@
 - name: Install Fail2ban SSH and optional honeypot jails
   ansible.builtin.template:
     src: fail2ban.local.j2
-    dest: /etc/fail2ban/jail.d/harness.local
+    dest: "{{ fail2ban_jail_path }}"
     mode: "0644"
   notify: Restart fail2ban
 

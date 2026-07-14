@@ -34,20 +34,25 @@ ssh_login_grace_time: "30"
 ssh_max_auth_tries: 3
 ssh_max_startups: "20:30:60"
 ssh_per_source_max_startups: 3
+ssh_hardening_config_path: /etc/ssh/sshd_config.d/00-harness-hardening.conf
 
 journald_system_max_use: "500M"
 journald_system_max_file_size: "100M"
 journald_max_retention_sec: "2week"
+journald_config_path: /etc/systemd/journald.conf.d/harness.conf
 
 fail2ban_sshd_bantime: "1h"
 fail2ban_sshd_findtime: "10m"
 fail2ban_sshd_maxretry: 8
 fail2ban_honeypot_enabled: false
 fail2ban_honeypot_name: "phoenix-honeypot"
+fail2ban_honeypot_filter_name: "{{ fail2ban_honeypot_name }}"
 fail2ban_honeypot_failregex: "^.*Honeypot triggered for (?:contact|interest) form from IP <HOST>\\s*$"
 fail2ban_honeypot_bantime: "1h"
 fail2ban_honeypot_findtime: "10m"
 fail2ban_honeypot_maxretry: 1
+fail2ban_honeypot_filter_path: "/etc/fail2ban/filter.d/{{ fail2ban_honeypot_filter_name }}.conf"
+fail2ban_jail_path: /etc/fail2ban/jail.d/harness.local
 
 firewall_manage: true
 firewall_default_incoming_policy: deny

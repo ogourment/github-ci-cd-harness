@@ -12,7 +12,7 @@ port = ssh
 [{{ fail2ban_honeypot_name }}]
 enabled = true
 backend = systemd
-filter = {{ fail2ban_honeypot_name }}
+filter = {{ fail2ban_honeypot_filter_name }}
 banaction = ufw
 journalmatch = SYSLOG_IDENTIFIER={{ otp_app_name }}
 maxretry = {{ fail2ban_honeypot_maxretry }}
