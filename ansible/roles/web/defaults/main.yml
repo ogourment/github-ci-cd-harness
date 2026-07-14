@@ -1,0 +1,13 @@
+---
+# nginx + Certbot TLS for a Phoenix app. Run phoenix_blue_green before this role
+# so the upstream include exists before nginx validates the virtual host.
+web_packages:
+  - nginx
+  - certbot
+  - python3-certbot-nginx
+
+nginx_site_name: "{{ app_name }}"
+server_aliases: []
+nginx_legacy_site_names: []
+nginx_legacy_upstream_includes: []
+nginx_drop_scanner_probes: true
