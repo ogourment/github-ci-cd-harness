@@ -12,5 +12,15 @@
 # does a full zero-downtime cutover.
 - name: Restart active color
   ansible.builtin.shell: |
+    set -euo pipefail
     color=$(cat {{ app_current_color_file }} 2>/dev/null || echo blue)
-    systemctl restart {{ app_name }}@${color}.service || true
+    release={{ app_root }}/${color}/bin/{{ otp_app_name }}
+
+    if [[ -x "${release}" ]]; then
+      systemctl restart {{ app_name }}@${color}.service
+      echo restarted
+    fi
+  args:
+    executable: /bin/bash
+  register: active_color_restart
+  changed_when: "'restarted' in active_color_restart.stdout"
