@@ -1,83 +1,28 @@
 ---
-- name: Validate required Phoenix deployment variables
+# Two-instance zero-downtime blue/green runtime for a Phoenix release host.
+# Assumes nginx + postgres are provisioned by other roles (phoenix_postgres and
+# an nginx role); this role owns the systemd instances, per-color env, the
+# deploy/rollback/notify helpers, the current_color pointer, and the nginx
+# upstream include that the deploy script flips.
+- name: Validate required blue/green variables
   ansible.builtin.assert:
     that:
-      - app_name is defined
-      - otp_app_name is defined
-      - app_user is defined
-      - app_root is defined
-      - deploy_script_path is defined
-      - server_name is defined
-    fail_msg: "Set app_name, otp_app_name, app_user, app_root, deploy_script_path, and server_name in inventory group_vars."
+      - app_name is defined and app_name | length > 0
+      - otp_app_name is defined and otp_app_name | length > 0
+      - deploy_user is defined and deploy_user | length > 0
+      - secret_key_base is defined and secret_key_base | length > 0
+      - release_migrate_module is defined and release_migrate_module | length > 0
+    quiet: true
 
-- name: Install runtime packages
-  ansible.builtin.apt:
-    name: "{{ phoenix_runtime_packages + (phoenix_runtime_extra_packages | default([])) }}"
-    state: present
-    update_cache: true
-  vars:
-    phoenix_runtime_packages:
-      - acl
-      - curl
-      - jq
-      - nginx
-      - postgresql
-      - postgresql-contrib
-      - rsync
-      - sudo
-      - ufw
-
-- name: Ensure deploy and app users exist
-  ansible.builtin.user:
-    name: "{{ item }}"
-    shell: /bin/bash
-    create_home: true
-  loop:
-    - "{{ deploy_user | default('deploy') }}"
-    - "{{ app_user }}"
-
-- name: Ensure app directories exist
+- name: Ensure app root exists
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ app_root }}"
     state: directory
-    owner: "{{ app_user }}"
-    group: "{{ app_user }}"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
     mode: "0755"
-  loop:
-    - "{{ app_root }}"
-    - "{{ app_root }}/releases"
-    - "{{ app_env_dir | default('/etc/' ~ app_name) }}"
 
-- name: Install environment file
-  ansible.builtin.template:
-    src: phoenix.env.j2
-    dest: "{{ app_env_file | default(app_env_dir | default('/etc/' ~ app_name) ~ '/' ~ app_name ~ '.env') }}"
-    owner: root
-    group: "{{ app_user }}"
-    mode: "0640"
-
-- name: Install systemd slot services
-  ansible.builtin.template:
-    src: phoenix@.service.j2
-    dest: "/etc/systemd/system/{{ app_service_name | default(app_name) }}@.service"
-    mode: "0644"
-  notify: Reload systemd
-
-- name: Install nginx site
-  ansible.builtin.template:
-    src: phoenix.nginx.j2
-    dest: "/etc/nginx/sites-available/{{ app_name }}"
-    mode: "0644"
-  notify: Reload nginx
-
-- name: Enable nginx site
-  ansible.builtin.file:
-    src: "/etc/nginx/sites-available/{{ app_name }}"
-    dest: "/etc/nginx/sites-enabled/{{ app_name }}"
-    state: link
-  notify: Reload nginx
-
-- name: Install deploy helper
+- name: Install deploy script
   ansible.builtin.template:
     src: phoenix_deploy.sh.j2
     dest: "{{ deploy_script_path }}"
@@ -85,28 +30,89 @@
     group: root
     mode: "0755"
 
-- name: Allow deploy user to run deploy helper
+- name: Install rollback script
+  ansible.builtin.template:
+    src: phoenix_rollback.sh.j2
+    dest: "{{ deploy_rollback_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install Telegram notify script
+  ansible.builtin.template:
+    src: phoenix_telegram_notify.sh.j2
+    dest: "{{ telegram_notify_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create per-slot environment files
+  ansible.builtin.template:
+    src: phoenix.env.j2
+    dest: "{{ app_env_file }}_{{ item.color }}"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0600"
+  loop:
+    - { color: blue, port: "{{ app_port_blue }}" }
+    - { color: green, port: "{{ app_port_green }}" }
+  vars:
+    slot_port: "{{ item.port }}"
+    slot_color: "{{ item.color }}"
+  notify: Restart active color
+
+- name: Initialize current_color pointer (first provisioning only)
   ansible.builtin.copy:
-    dest: "/etc/sudoers.d/{{ app_name }}_deploy"
-    content: "{{ deploy_user | default('deploy') }} ALL=(root) NOPASSWD: {{ deploy_script_path }} *\n"
-    mode: "0440"
-    validate: /usr/sbin/visudo -cf %s
+    dest: "{{ app_current_color_file }}"
+    content: "green\n"
+    force: false
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0644"
 
-- name: Configure firewall public ports
-  ansible.builtin.command:
-    argv:
-      - ufw
-      - allow
-      - "{{ item }}/tcp"
-  changed_when: false
-  loop: "{{ firewall_public_tcp_ports | default([80, 443]) }}"
-  when: firewall_manage | default(true)
+- name: Seed nginx upstream include (first provisioning only)
+  ansible.builtin.copy:
+    dest: "{{ nginx_upstream_include }}"
+    content: |
+      upstream {{ nginx_upstream_name }} {
+          server 127.0.0.1:{{ app_port_blue }};
+      }
+    force: false
+    owner: root
+    group: root
+    mode: "0644"
 
-- name: Enable firewall
-  ansible.builtin.command:
-    argv:
-      - ufw
-      - --force
-      - enable
-  changed_when: false
-  when: firewall_manage | default(true)
+- name: Install systemd template unit
+  ansible.builtin.template:
+    src: phoenix@.service.j2
+    dest: "/etc/systemd/system/{{ app_name }}@.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Enable both color instances
+  ansible.builtin.systemd:
+    name: "{{ app_name }}@{{ item }}.service"
+    enabled: true
+    daemon_reload: true
+  loop:
+    - blue
+    - green
+  failed_when: false
+
+- name: Check for a deployed release in either color
+  ansible.builtin.stat:
+    path: "{{ app_root }}/{{ item }}/bin/{{ otp_app_name }}"
+  register: color_release_bins
+  loop:
+    - blue
+    - green
+
+- name: Start the active color when a release exists
+  ansible.builtin.systemd:
+    name: "{{ app_name }}@{{ item.item }}.service"
+    state: started
+  loop: "{{ color_release_bins.results }}"
+  when: item.stat.exists
+  failed_when: false

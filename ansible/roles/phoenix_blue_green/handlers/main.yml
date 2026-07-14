@@ -7,3 +7,10 @@
   ansible.builtin.service:
     name: nginx
     state: reloaded
+
+# Env-file changes restart only the active color (~3s blip). The next deploy
+# does a full zero-downtime cutover.
+- name: Restart active color
+  ansible.builtin.shell: |
+    color=$(cat {{ app_current_color_file }} 2>/dev/null || echo blue)
+    systemctl restart {{ app_name }}@${color}.service || true

@@ -1,194 +1,237 @@
 #!/usr/bin/env bash
+#
+# Two-instance zero-downtime blue/green deploy for {{ app_name }}.
+# Managed by Ansible at {{ deploy_script_path }} — do not edit by hand.
+#
+# Usage:  sudo {{ deploy_script_path }} <release_id> [migrate]
+#
+# Flow: stage release into the idle color → migrate → start → health-check
+# (version + color via {{ deploy_health_path }}) → rewrite nginx upstream →
+# reload → drain + stop old color → prune. User-visible downtime is 0 as long
+# as the new color passes its health check.
+#
 set -euo pipefail
 
-APP_NAME="{{ app_name }}"
 OTP_APP="{{ otp_app_name }}"
-APP_ROOT="{{ app_root }}"
-APP_USER="{{ app_user }}"
-ENV_FILE="{{ app_env_file | default(app_env_dir | default('/etc/' ~ app_name) ~ '/' ~ app_name ~ '.env') }}"
-SERVICE_NAME="{{ app_service_name | default(app_name) }}"
-RELEASE_ID="${2:-${1:?release id or archive required}}"
-RUN_MIGRATIONS="${3:-${2:-}}"
+MIGRATE_MODULE="{{ release_migrate_module }}"
+STAGE_ROOT="{{ app_root }}"
+DEPLOY_USER="{{ deploy_user }}"
+SERVICE_BASE="{{ app_name }}"
+NGINX_UPSTREAM_FILE="{{ nginx_upstream_include }}"
+NGINX_UPSTREAM_NAME="{{ nginx_upstream_name }}"
+CURRENT_COLOR_FILE="{{ app_current_color_file }}"
+ENV_FILE_BASE="{{ app_env_file }}"
+
+PORT_BLUE="{{ app_port_blue }}"
+PORT_GREEN="{{ app_port_green }}"
+
+HEALTH_PATH="{{ deploy_health_path }}"
+HEALTH_TIMEOUT_SEC={{ deploy_health_timeout_sec }}
+HEALTH_INTERVAL_SEC=2
+DRAIN_SEC={{ deploy_drain_sec }}
+
+RELEASE_ID="${1:?release id required}"
+RUN_MIGRATIONS="${2:-}"
+SRC_DIR="{{ deploy_releases_root }}/${RELEASE_ID}"
+
+# --- Deploy notifications (best-effort; never break the deploy) --------------
+DEPLOY_ENV="{{ deploy_env }}"
+NOTIFY_SCRIPT="{{ telegram_notify_script }}"
 REMOTE_ENV_PREFIX="{{ remote_env_prefix | default(otp_app_name | upper) }}"
-DEPLOY_ENV="{{ deploy_env | default('staging') }}"
-NOTIFY_SCRIPT="{{ telegram_notify_script | default('/usr/local/bin/' ~ app_name ~ '_telegram_notify') }}"
 DEPLOY_STARTED_EPOCH="$(date -u +%s)"
 
-env_value() {
-  local name="$1"
-  printf '%s' "${!name:-}"
-}
-
-duration_label() {
-  local seconds="${1:-}"
-
-  case "${seconds}" in
-    ''|*[!0-9]*) echo "unknown"; return ;;
-  esac
-
-  printf '%sm %ss' "$((seconds / 60))" "$((seconds % 60))"
-}
-
 metadata_value() {
-  local suffix="$1"
-  local fallback="${2:-}"
-  local value
-
-  value="$(env_value "${REMOTE_ENV_PREFIX}_${suffix}")"
-  if [[ -n "${value}" ]]; then
-    printf '%s' "${value}"
-  else
-    printf '%s' "${fallback}"
-  fi
+  local name="${REMOTE_ENV_PREFIX}_$1"
+  local value="${!name:-}"
+  [[ -n "${value}" ]] && printf '%s' "${value}" || printf '%s' "${2:-}"
 }
 
-APP_DISPLAY_NAME="$(metadata_value APP_NAME "${APP_NAME}")"
+APP_DISPLAY_NAME="$(metadata_value APP_NAME "{{ app_name }}")"
 APP_VERSION="$(metadata_value APP_VERSION unknown)"
-GIT_SUBJECT="$(metadata_value GIT_SUBJECT unknown)"
-GIT_MESSAGES="$(metadata_value GIT_MESSAGES "${GIT_SUBJECT}")"
 ACTOR="$(metadata_value DEPLOY_ACTOR "${USER:-unknown}")"
-CI_PIPELINE_ID="$(metadata_value CI_PIPELINE_ID unknown)"
-CI_JOB_ID="$(metadata_value CI_JOB_ID unknown)"
-CI_JOB_WAIT_SECONDS="$(metadata_value CI_JOB_WAIT_SECONDS)"
-CI_PIPELINE_CREATED_AT_EPOCH="$(metadata_value CI_PIPELINE_CREATED_AT_EPOCH)"
-HOST_DEPLOY_NOTIFY="$(metadata_value HOST_DEPLOY_NOTIFY true)"
+CI_PIPELINE_ID="$(metadata_value CI_PIPELINE_ID "${CI_PIPELINE_ID:-unknown}")"
 
-notify_telegram() {
-  if [[ "${HOST_DEPLOY_NOTIFY}" =~ ^(0|false|FALSE|no|NO)$ ]]; then
-    return 0
-  fi
+html_escape() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 
-  if [[ -x "${NOTIFY_SCRIPT}" ]]; then
-    TELEGRAM_SILENT="${2:-true}" "${NOTIFY_SCRIPT}" "$1" || true
-  fi
+notify() {
+  [[ -x "${NOTIFY_SCRIPT}" ]] || return 0
+  TELEGRAM_SILENT="${2:-true}" "${NOTIFY_SCRIPT}" "$1" >/dev/null 2>&1 || true
 }
 
-deployment_timing_summary() {
-  local deploy_seconds total_seconds
-
-  deploy_seconds="$(($(date -u +%s) - DEPLOY_STARTED_EPOCH))"
-  total_seconds=""
-  if [[ "${CI_PIPELINE_CREATED_AT_EPOCH}" =~ ^[0-9]+$ ]]; then
-    total_seconds="$(($(date -u +%s) - CI_PIPELINE_CREATED_AT_EPOCH))"
-  fi
-
-  printf 'deploy=%s wait=%s total=%s' \
-    "$(duration_label "${deploy_seconds}")" \
-    "$(duration_label "${CI_JOB_WAIT_SECONDS}")" \
-    "$(duration_label "${total_seconds}")"
-}
-
-html_escape() {
-  printf '%s' "$1" | sed -e 's/&/\\&amp;/g' -e 's/</\\&lt;/g' -e 's/>/\\&gt;/g'
-}
-
-slot_active_dot() {
-  local slot="$1"
-  local unit="${SERVICE_NAME}@${slot}.service"
-  local status
-
-  status="$(systemctl is-active "${unit}" 2>/dev/null || true)"
-  if [ "$status" = "active" ]; then
-    printf '🟢'
-  else
-    printf '⚪'
-  fi
-}
-
-deployment_slot_summary() {
-  printf 'Slots: blue %s green %s\n' \
-    "$(slot_active_dot blue)" \
-    "$(slot_active_dot green)"
-}
-
-commit_count() {
-  local messages
-
-  messages="${GIT_MESSAGES//\\n/$'\n'}"
-  printf '%s\n' "${messages}" | grep -c .
-}
-
-deployment_commit_messages() {
-  local messages
-  local lines_shown=0
-  local max_lines=5
-  local printed=0
-  local line_count
-  local remaining
-  local message
-
-  messages="${GIT_MESSAGES//\\n/$'\n'}"
-  if [ -z "$messages" ]; then
-    return 0
-  fi
-
-  line_count="$(commit_count)"
-  printf 'Commits: %s\n' "${line_count}"
-
-  while IFS= read -r message; do
-    [ -z "$message" ] && continue
-    printf '- %s\n' "$(html_escape "$message")"
-    lines_shown=$((lines_shown + 1))
-    printed=$((printed + 1))
-    if [ "$lines_shown" -ge "$max_lines" ]; then
-      if [ "$line_count" -gt "$printed" ]; then
-        remaining=$((line_count - printed))
-        printf '... %s more\n' "${remaining}"
-      fi
-      break
-    fi
-  done <<< "$messages"
-}
-
-deployment_metadata_summary() {
-  printf 'Pipeline: <code>%s</code> job <code>%s</code>\n' \
-    "$(html_escape "${CI_PIPELINE_ID:-unknown}")" \
-    "$(html_escape "${CI_JOB_ID:-unknown}")"
-  printf 'Release: <code>%s</code>\n' "$(html_escape "${RELEASE_ID:-unknown}")"
-  printf 'Actor: <code>%s</code>\n' "$(html_escape "${ACTOR:-unknown}")"
-  deployment_slot_summary
-  printf 'Timing: <code>%s</code>\n' "$(deployment_timing_summary)"
-  deployment_commit_messages
+deploy_summary() {
+  local secs=$(( $(date -u +%s) - DEPLOY_STARTED_EPOCH ))
+  printf 'Release: <code>%s</code>\nColor: <code>%s</code>\nActor: <code>%s</code>\nPipeline: <code>%s</code>\nDeploy: <code>%ss</code>' \
+    "$(html_escape "${RELEASE_ID}")" "$(html_escape "${TARGET_COLOR:-?}")" \
+    "$(html_escape "${ACTOR}")" "$(html_escape "${CI_PIPELINE_ID}")" "${secs}"
 }
 
 on_deploy_error() {
-  status="$?"
-  notify_telegram "❌ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} <code>v${APP_VERSION}</code> failed</b>\nStatus: <code>${status}</code>\n$(deployment_metadata_summary)" false
+  local status="$?"
+  notify "❌ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} deploy failed</b>\nStatus: <code>${status}</code>\n$(deploy_summary)" false
   exit "${status}"
 }
-
 trap on_deploy_error ERR
 
-if [[ "${1:-}" == *.tar.gz ]]; then
-  ARCHIVE="$1"
-  DEST_DIR="${APP_ROOT}/releases/${RELEASE_ID}"
-  rm -rf "$DEST_DIR"
-  mkdir -p "$DEST_DIR"
-  tar -xzf "$ARCHIVE" -C "$DEST_DIR" --strip-components=1
+# --- Pick idle color ---------------------------------------------------------
+if [[ -f "${CURRENT_COLOR_FILE}" ]]; then
+  CURRENT_COLOR="$(cat "${CURRENT_COLOR_FILE}")"
 else
-  SRC_DIR="{{ deploy_releases_root | default('/home/deploy/releases') }}/${1:?release id required}"
-  DEST_DIR="${APP_ROOT}/releases/${1}"
-  RELEASE_ID="$1"
-  rm -rf "$DEST_DIR"
-  mkdir -p "$DEST_DIR"
-  rsync -a --delete "$SRC_DIR/" "$DEST_DIR/"
+  CURRENT_COLOR="green"   # first deploy → target blue
 fi
+case "${CURRENT_COLOR}" in
+  blue)  TARGET_COLOR="green"; TARGET_PORT="${PORT_GREEN}" ;;
+  green) TARGET_COLOR="blue" ; TARGET_PORT="${PORT_BLUE}"  ;;
+  *) echo "ERROR: invalid current_color '${CURRENT_COLOR}'" >&2; exit 1 ;;
+esac
 
-chown -R "$APP_USER:$APP_USER" "$DEST_DIR"
-ln -sfn "$DEST_DIR" "${APP_ROOT}/current"
+RELEASE_DIR="${STAGE_ROOT}/releases/${RELEASE_ID}"
+TARGET_LINK="${STAGE_ROOT}/${TARGET_COLOR}"
+TARGET_SERVICE="${SERVICE_BASE}@${TARGET_COLOR}.service"
+CURRENT_SERVICE="${SERVICE_BASE}@${CURRENT_COLOR}.service"
 
-if [[ "$RUN_MIGRATIONS" == "migrate" ]]; then
-  sudo -u "$APP_USER" bash -lc "
+echo "==> Release     : ${RELEASE_ID}"
+echo "==> Live color  : ${CURRENT_COLOR}"
+echo "==> Target color: ${TARGET_COLOR} (port ${TARGET_PORT})"
+
+[[ -d "${SRC_DIR}" ]] || { echo "ERROR: source ${SRC_DIR} missing" >&2; exit 1; }
+
+echo "==> Staging release..."
+rm -rf "${RELEASE_DIR}"
+mkdir -p "${RELEASE_DIR}"
+rsync -a --delete "${SRC_DIR}/" "${RELEASE_DIR}/"
+chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "${RELEASE_DIR}"
+
+STATIC_SRC=""
+for dir in "${RELEASE_DIR}/lib/${OTP_APP}-"*/priv/static; do
+  [[ -d "$dir" ]] && { STATIC_SRC="$dir"; break; }
+done
+[[ -n "${STATIC_SRC}" ]] && ln -sfn "${STATIC_SRC}" "${RELEASE_DIR}/static_assets" \
+  || echo "WARNING: no static assets under ${RELEASE_DIR}/lib/${OTP_APP}-*/priv/static"
+
+echo "==> Pointing ${TARGET_COLOR} → ${RELEASE_ID}"
+ln -sfn "${RELEASE_DIR}" "${TARGET_LINK}"
+
+if [[ "${RUN_MIGRATIONS}" == "migrate" ]]; then
+  echo "==> Running migrations (must be backward-compatible with ${CURRENT_COLOR})..."
+  sudo -u "${DEPLOY_USER}" bash -lc "
     set -euo pipefail
-    set -a
-    source '$ENV_FILE'
-    set +a
-    cd '$DEST_DIR'
-    MIX_ENV=prod bin/$OTP_APP eval '{{ release_migrate_module | default('Elixir.' ~ otp_app_name | replace('_', '') ~ '.Release') }}.migrate'
+    set -a; [[ -f '${ENV_FILE_BASE}_${TARGET_COLOR}' ]] && source '${ENV_FILE_BASE}_${TARGET_COLOR}'; set +a
+    cd '${RELEASE_DIR}'
+    MIX_ENV=prod 'bin/${OTP_APP}' eval '${MIGRATE_MODULE}.migrate()'
+  "
+  echo "==> Running release seeds..."
+  sudo -u "${DEPLOY_USER}" bash -lc "
+    set -euo pipefail
+    set -a; [[ -f '${ENV_FILE_BASE}_${TARGET_COLOR}' ]] && source '${ENV_FILE_BASE}_${TARGET_COLOR}'; set +a
+    cd '${RELEASE_DIR}'
+    MIX_ENV=prod 'bin/${OTP_APP}' eval '${MIGRATE_MODULE}.seed()'
   "
 fi
 
-systemctl restart "${SERVICE_NAME}@blue.service" || systemctl restart "${SERVICE_NAME}.service"
+echo "==> Starting ${TARGET_SERVICE}..."
+systemctl restart "${TARGET_SERVICE}"
 
-notify_telegram "✅ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} <code>v${APP_VERSION}</code> passed</b>\n$(deployment_metadata_summary)" true
+EXPECTED_VERSION="$(ls "${RELEASE_DIR}/releases/" 2>/dev/null | head -1 || true)"
+[[ -n "${EXPECTED_VERSION}" ]] || { echo "ERROR: cannot determine release version" >&2; exit 1; }
+
+echo "==> Health-checking http://127.0.0.1:${TARGET_PORT}${HEALTH_PATH} (version=${EXPECTED_VERSION}, color=${TARGET_COLOR})..."
+deadline=$(( $(date +%s) + HEALTH_TIMEOUT_SEC ))
+while true; do
+  resp="$(curl -sf --max-time 2 "http://127.0.0.1:${TARGET_PORT}${HEALTH_PATH}" 2>/dev/null || true)"
+  if [[ -n "${resp}" ]]; then
+    actual_version="$(printf '%s' "${resp}" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)"
+    actual_color="$(printf '%s' "${resp}" | grep -o '"color":"[^"]*"' | cut -d'"' -f4)"
+    if [[ "${actual_version}" == "${EXPECTED_VERSION}" && "${actual_color}" == "${TARGET_COLOR}" ]]; then
+      echo "    ${TARGET_COLOR} healthy: version=${actual_version}, color=${actual_color}"
+      break
+    fi
+    echo "    /health mismatch (version=${actual_version:-?}, color=${actual_color:-?}); retrying..."
+  fi
+  if [[ $(date +%s) -ge ${deadline} ]]; then
+    echo "ERROR: ${TARGET_COLOR} failed health check after ${HEALTH_TIMEOUT_SEC}s; ${CURRENT_COLOR} still live." >&2
+    systemctl stop "${TARGET_SERVICE}" || true
+    exit 1
+  fi
+  sleep "${HEALTH_INTERVAL_SEC}"
+done
+
+echo "==> Cutting nginx upstream → 127.0.0.1:${TARGET_PORT}"
+tmp="$(mktemp)"
+cat > "${tmp}" <<EOF
+upstream ${NGINX_UPSTREAM_NAME} {
+    server 127.0.0.1:${TARGET_PORT};
+}
+EOF
+mv "${tmp}" "${NGINX_UPSTREAM_FILE}"
+nginx -t
+nginx -s reload
+
+echo "${TARGET_COLOR}" > "${CURRENT_COLOR_FILE}"
+chown "${DEPLOY_USER}:${DEPLOY_USER}" "${CURRENT_COLOR_FILE}"
+
+{% if phoenix_deploy_record %}
+echo "==> Recording deployment timeline entry..."
+sudo -u "${DEPLOY_USER}" env \
+  CI_COMMIT_SHA="${CI_COMMIT_SHA:-}" CI_COMMIT_TITLE="${CI_COMMIT_TITLE:-}" CI_PIPELINE_URL="${CI_PIPELINE_URL:-}" \
+  bash -lc "
+  set -euo pipefail
+  set -a; [[ -f '${ENV_FILE_BASE}_${TARGET_COLOR}' ]] && source '${ENV_FILE_BASE}_${TARGET_COLOR}'; set +a
+  cd '${RELEASE_DIR}'
+  MIX_ENV=prod 'bin/${OTP_APP}' eval '${MIGRATE_MODULE}.record_deployment(\"${RELEASE_ID}\", \"${DEPLOY_ENV}\", \"${TARGET_COLOR}\", \"${EXPECTED_VERSION}\")'
+" || echo "WARNING: deployment timeline entry could not be recorded"
+{% endif %}
+
+if [[ "${CURRENT_COLOR}" != "${TARGET_COLOR}" ]] && systemctl is-active --quiet "${CURRENT_SERVICE}"; then
+  echo "==> Draining old ${CURRENT_COLOR} for ${DRAIN_SEC}s, then stopping..."
+  sleep "${DRAIN_SEC}"
+  systemctl stop "${CURRENT_SERVICE}" || true
+fi
+
+echo "==> Cutover complete. Active = ${TARGET_COLOR}."
+
+# --- Release pruning: keep 5 recent + 1/day for 7d + 1/week for 14d ----------
+{% raw %}
+prune_releases() {
+  local releases_dir="$1"; shift
+  local -a protected=("$@")
+  local keep_recent=5 keep_daily_days=7 keep_weekly_days=14
+  [[ -d "$releases_dir" ]] || return 0
+  local now; now=$(date +%s)
+  local -a all=()
+  while IFS= read -r entry; do all+=("$entry"); done < <(
+    find "$releases_dir" -maxdepth 1 -mindepth 1 -type d -printf '%T@ %f\n' | sort -rn | awk '{print $2}')
+  local total=${#all[@]}
+  if (( total <= keep_recent )); then echo "  ${releases_dir}: ${total} releases, nothing to prune."; return; fi
+  local -A keep=() seen_day=() seen_week=()
+  local p; for p in "${protected[@]}"; do [[ -n "$p" ]] && keep["$p"]=protected; done
+  local idx=0
+  for rel in "${all[@]}"; do
+    if (( idx < keep_recent )); then keep["$rel"]=recent; (( idx++ )) || true; continue; fi
+    (( idx++ ))
+    local mtime; mtime=$(stat -c %Y "${releases_dir}/${rel}")
+    local age_days=$(( (now - mtime) / 86400 ))
+    if (( age_days <= keep_daily_days )); then
+      local day; day=$(date -d "@${mtime}" +%Y-%m-%d)
+      [[ -z "${seen_day[$day]:-}" ]] && { seen_day["$day"]=1; keep["$rel"]=daily; }
+    elif (( age_days <= keep_weekly_days )); then
+      local week; week=$(date -d "@${mtime}" +%G-W%V)
+      [[ -z "${seen_week[$week]:-}" ]] && { seen_week["$week"]=1; keep["$rel"]=weekly; }
+    fi
+  done
+  local removed=0
+  for rel in "${all[@]}"; do
+    [[ -z "${keep[$rel]:-}" ]] && { rm -rf "${releases_dir:?}/${rel}"; (( removed++ )) || true; }
+  done
+  echo "  ${releases_dir}: pruned ${removed}/${total} (kept $((total - removed)))"
+}
+{% endraw %}
+
+BLUE_ID="$(basename "$(readlink -f "${STAGE_ROOT}/blue" 2>/dev/null || echo /dev/null)")"
+GREEN_ID="$(basename "$(readlink -f "${STAGE_ROOT}/green" 2>/dev/null || echo /dev/null)")"
+echo "==> Pruning old releases..."
+prune_releases "${STAGE_ROOT}/releases"     "${RELEASE_ID}" "${BLUE_ID}" "${GREEN_ID}"
+prune_releases "{{ deploy_releases_root }}" "${RELEASE_ID}"
+
+notify "✅ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} deployed</b>\n$(deploy_summary)" true
 trap - ERR
+echo "==> Done."

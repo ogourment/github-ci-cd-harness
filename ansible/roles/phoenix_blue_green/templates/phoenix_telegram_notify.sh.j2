@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+#
+# Best-effort Telegram notifier for {{ app_name }} deploys.
+# Managed by Ansible at {{ telegram_notify_script }} — do not edit by hand.
+#
+# Usage:  {{ telegram_notify_script }} "<html message>"
+# Env:    TELEGRAM_SILENT=true|false  (disable_notification)
+#
+# Reads TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID from the active color's env file
+# (they are set there when configured). Silent no-op if unset.
+#
+set -euo pipefail
+
+MESSAGE="${1:-}"
+[[ -n "${MESSAGE}" ]] || exit 0
+
+CURRENT_COLOR="$(cat {{ app_current_color_file }} 2>/dev/null || echo blue)"
+ENV_FILE="{{ app_env_file }}_${CURRENT_COLOR}"
+[[ -f "${ENV_FILE}" ]] && { set -a; . "${ENV_FILE}"; set +a; }
+
+: "${TELEGRAM_BOT_TOKEN:=}"
+: "${TELEGRAM_CHAT_ID:=}"
+[[ -n "${TELEGRAM_BOT_TOKEN}" && -n "${TELEGRAM_CHAT_ID}" ]] || exit 0
+
+case "${TELEGRAM_SILENT:-true}" in
+  0|false|FALSE|no|NO) SILENT=false ;;
+  *) SILENT=true ;;
+esac
+
+curl -sS --max-time 10 \
+  "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+  --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+  --data-urlencode "text=${MESSAGE}" \
+  --data-urlencode "parse_mode=HTML" \
+  --data-urlencode "disable_notification=${SILENT}" \
+  >/dev/null 2>&1 || true

@@ -1,0 +1,45 @@
+---
+# Two-instance zero-downtime blue/green for a Phoenix release host (v0.4.0).
+# Sensible defaults; the consumer (inventory/group_vars) must still set the
+# app identity + secrets (app_name, otp_app_name, secret_key_base, db_*, ...).
+
+# Ports the two color instances bind to (nginx upstream flips between them).
+app_port_blue: 4000
+app_port_green: 4001
+app_bind_ip: "127.0.0.1"
+
+# Filesystem layout (derived from app_name unless overridden).
+app_root: "/opt/{{ app_name }}"
+app_env_file: "/etc/default/{{ app_name }}"
+app_current_color_file: "{{ app_root }}/current_color"
+deploy_releases_root: "/home/{{ deploy_user }}/releases"
+deploy_script_path: "/usr/local/bin/{{ app_name }}_deploy"
+deploy_rollback_script_path: "/usr/local/bin/{{ app_name }}_rollback"
+telegram_notify_script: "/usr/local/bin/{{ app_name }}_telegram_notify"
+
+# systemd template unit base name ({{ app_name }}@blue / @green).
+app_service_name: "{{ app_name }}"
+
+# Cutover tuning.
+deploy_health_path: "/health"
+deploy_health_timeout_sec: 60
+deploy_drain_sec: 5
+
+# nginx upstream include the deploy script rewrites to flip colors.
+nginx_upstream_name: "{{ app_name }}_upstream"
+nginx_upstream_include: "/etc/nginx/conf.d/{{ app_name }}_upstream.conf"
+
+# App-facing env var names for the deploy env + live color, so the app can
+# surface them (e.g. in /health, which the deploy health-check reads). Keep the
+# defaults unless the app already reads a specific name (ecojeux: ECOJEUX_*).
+phoenix_env_indicator_var: "DEPLOY_ENV"
+phoenix_color_env_var: "DEPLOY_COLOR"
+deploy_env: "production"
+
+# Extra, app-specific env lines appended verbatim to each color's env file
+# (BREVO/STRIPE/... for ecojeux). Multi-line string; rendered as-is.
+phoenix_env_extra: ""
+
+# Optional: after a successful cutover, eval a release hook to record the
+# deployment. Set true and provide release_migrate_module.record_deployment/4.
+phoenix_deploy_record: false

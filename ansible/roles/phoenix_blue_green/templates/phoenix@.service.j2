@@ -1,17 +1,15 @@
 [Unit]
-Description={{ app_name }} Phoenix release slot %i
+Description={{ app_name }} ({{ app_name }}@%i)
 After=network.target postgresql.service
 
 [Service]
-Type=simple
-User={{ app_user }}
-Group={{ app_user }}
-WorkingDirectory={{ app_root }}/current
-EnvironmentFile={{ app_env_file | default(app_env_dir | default('/etc/' ~ app_name) ~ '/' ~ app_name ~ '.env') }}
-Environment=PORT={{ '{{' }}PORT{{ '}}' }}
-ExecStart={{ app_root }}/current/bin/{{ otp_app_name }} start
+User={{ deploy_user }}
+WorkingDirectory={{ app_root }}/%i
+EnvironmentFile={{ app_env_file }}_%i
+ExecStart={{ app_root }}/%i/bin/{{ otp_app_name }} start
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=60
 
 [Install]
 WantedBy=multi-user.target
