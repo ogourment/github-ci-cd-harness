@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 077
+
+APP_NAME="{{ app_name }}"
+APP_ROOT="{{ app_root }}"
+APP_ENV_FILE="{{ app_env_file }}"
+BACKUP_ROOT="{{ backup_root }}"
+SNAPSHOTS_ROOT="${BACKUP_ROOT}/snapshots"
+LATEST_LINK="${BACKUP_ROOT}/latest"
+PG_DUMP_BIN="{{ backup_pg_dump_bin }}"
+KEEP_RECENT={{ backup_keep_recent | int }}
+KEEP_DAILY_DAYS={{ backup_keep_daily_days | int }}
+KEEP_WEEKLY_DAYS={{ backup_keep_weekly_days | int }}
+# Name of the env var (in APP_ENV_FILE) pointing at an uploads dir to archive.
+# Empty => skip uploads. Set via role var backup_uploads_env_var.
+UPLOADS_ENV_VAR="{{ backup_uploads_env_var | default('') }}"
+
+log() {
+  printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
+}
+
+cleanup_tmp_dir() {
+  if [[ -n "${tmp_dir:-}" && -d "${tmp_dir}" ]]; then
+    rm -rf "${tmp_dir}"
+  fi
+}
+
+snapshot_epoch() {
+  local name="$1"
+  date -u -d "${name:0:4}-${name:4:2}-${name:6:2} ${name:9:2}:${name:11:2}:${name:13:2} UTC" +%s
+}
+
+prune_snapshots() {
+  local now_epoch
+  now_epoch="$(date -u +%s)"
+  local -a snapshots=()
+
+  mapfile -t snapshots < <(
+    find "$SNAPSHOTS_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -r
+  )
+
+  declare -A keep_daily=()
+  declare -A keep_weekly=()
+  local index=0
+
+  for name in "${snapshots[@]}"; do
+    local path="${SNAPSHOTS_ROOT}/${name}"
+
+    if (( index < KEEP_RECENT )); then
+      index=$((index + 1))
+      continue
+    fi
+
+    local snap_epoch
+    if ! snap_epoch="$(snapshot_epoch "$name" 2>/dev/null)"; then
+      log "skipping unexpected directory: ${path}"
+      index=$((index + 1))
+      continue
+    fi
+
+    local age_days=$(( (now_epoch - snap_epoch) / 86400 ))
+    [[ $age_days -lt 0 ]] && age_days=0
+
+    if (( age_days <= KEEP_DAILY_DAYS )); then
+      local day_key
+      day_key="$(date -u -d "@${snap_epoch}" +%Y-%m-%d)"
+      if [[ -z "${keep_daily[$day_key]+x}" ]]; then
+        keep_daily["$day_key"]=1
+        index=$((index + 1))
+        continue
+      fi
+    elif (( age_days <= KEEP_WEEKLY_DAYS )); then
+      local week_key
+      week_key="$(date -u -d "@${snap_epoch}" +%G-W%V)"
+      if [[ -z "${keep_weekly[$week_key]+x}" ]]; then
+        keep_weekly["$week_key"]=1
+        index=$((index + 1))
+        continue
+      fi
+    fi
+
+    rm -rf "$path"
+    log "pruned snapshot ${name}"
+    index=$((index + 1))
+  done
+}
+
+command -v "$PG_DUMP_BIN" >/dev/null 2>&1 || { log "missing: $PG_DUMP_BIN"; exit 1; }
+command -v sha256sum >/dev/null 2>&1        || { log "missing: sha256sum"; exit 1; }
+
+mkdir -p "$SNAPSHOTS_ROOT"
+
+set -a; . "$APP_ENV_FILE"; set +a
+: "${DATABASE_URL:?DATABASE_URL is required in ${APP_ENV_FILE}}"
+
+PG_DUMP_URL="${DATABASE_URL/#ecto:\/\//postgresql://}"
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+host_name="$(hostname -f 2>/dev/null || hostname)"
+current_release="$(readlink -f "${APP_ROOT}/current" 2>/dev/null || true)"
+tmp_dir="${SNAPSHOTS_ROOT}/${timestamp}.tmp"
+run_dir="${SNAPSHOTS_ROOT}/${timestamp}"
+
+trap cleanup_tmp_dir EXIT
+mkdir -p "$tmp_dir"
+
+log "dumping database..."
+"$PG_DUMP_BIN" \
+  --format=custom \
+  --compress=9 \
+  --no-owner \
+  --no-privileges \
+  --file "${tmp_dir}/database.dump" \
+  "$PG_DUMP_URL"
+
+# Optional uploads backup: resolve the configured env var indirectly.
+uploads_dir=""
+if [[ -n "$UPLOADS_ENV_VAR" ]]; then
+  uploads_dir="${!UPLOADS_ENV_VAR:-}"
+fi
+if [[ -n "$uploads_dir" && -d "$uploads_dir" ]]; then
+  log "archiving uploads from ${uploads_dir}..."
+  tar -C "$(dirname "$uploads_dir")" -czf "${tmp_dir}/uploads.tar.gz" \
+    "$(basename "$uploads_dir")"
+else
+  log "no uploads directory configured or found, skipping uploads backup."
+fi
+
+cat > "${tmp_dir}/metadata.env" <<EOF
+BACKUP_APP_NAME=${APP_NAME}
+BACKUP_HOSTNAME=${host_name}
+BACKUP_TIMESTAMP=${timestamp}
+BACKUP_RELEASE=${current_release}
+EOF
+
+(
+  cd "$tmp_dir"
+  sha256sum database.dump metadata.env $(ls uploads.tar.gz 2>/dev/null || true) > SHA256SUMS
+)
+
+mv "$tmp_dir" "$run_dir"
+tmp_dir=""
+ln -sfn "$run_dir" "$LATEST_LINK"
+
+log "snapshot created: ${run_dir}"
+prune_snapshots

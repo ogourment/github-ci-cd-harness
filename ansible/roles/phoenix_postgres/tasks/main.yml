@@ -1,0 +1,31 @@
+---
+# Generic PostgreSQL provisioning for a Phoenix app host.
+# Consumer vars (shared naming, same as phoenix_blue_green): db_user,
+# db_password, db_name.
+- name: Install PostgreSQL
+  ansible.builtin.apt:
+    pkg:
+      - postgresql
+      - postgresql-contrib
+      - python3-psycopg2
+    state: present
+
+- name: Ensure PostgreSQL is running
+  ansible.builtin.service:
+    name: postgresql
+    state: started
+    enabled: true
+
+- name: Create database user
+  become_user: postgres
+  community.postgresql.postgresql_user:
+    name: "{{ db_user }}"
+    password: "{{ db_password }}"
+    role_attr_flags: NOSUPERUSER,CREATEDB
+    no_password_changes: false
+
+- name: Create application database
+  become_user: postgres
+  community.postgresql.postgresql_db:
+    name: "{{ db_name }}"
+    owner: "{{ db_user }}"
