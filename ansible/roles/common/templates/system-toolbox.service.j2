@@ -1,0 +1,16 @@
+[Unit]
+Description=system-toolbox host tool server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ system_toolbox_dir }}
+Environment=SYSTEM_TOOLBOX_HOST={{ system_toolbox_host }}
+Environment=SYSTEM_TOOLBOX_PORT={{ system_toolbox_port }}
+ExecStart={{ system_toolbox_uv_path }} run system-toolbox serve --host {{ system_toolbox_host }} --port {{ system_toolbox_port }}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
