@@ -50,6 +50,7 @@ APP_DISPLAY_NAME="$(metadata_value APP_NAME "{{ app_name }}")"
 APP_VERSION="$(metadata_value APP_VERSION unknown)"
 ACTOR="$(metadata_value DEPLOY_ACTOR "${USER:-unknown}")"
 CI_PIPELINE_ID="$(metadata_value CI_PIPELINE_ID "${CI_PIPELINE_ID:-unknown}")"
+HOST_DEPLOY_NOTIFY="$(metadata_value HOST_DEPLOY_NOTIFY true)"
 
 html_escape() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 
@@ -65,9 +66,21 @@ deploy_summary() {
     "$(html_escape "${ACTOR}")" "$(html_escape "${CI_PIPELINE_ID}")" "${secs}"
 }
 
+deploy_failure_message() {
+  local status="$1"
+  printf '❌ <b>[%s] %s deploy failed</b>\nStatus: <code>%s</code>\n%s' \
+    "${DEPLOY_ENV}" "${APP_DISPLAY_NAME}" "${status}" "$(deploy_summary)"
+}
+
+deploy_success_message() {
+  printf '✅ <b>[%s] %s deployed</b>\n%s' \
+    "${DEPLOY_ENV}" "${APP_DISPLAY_NAME}" "$(deploy_summary)"
+}
+
 on_deploy_error() {
   local status="$?"
-  notify "❌ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} deploy failed</b>\nStatus: <code>${status}</code>\n$(deploy_summary)" false
+  # Deployment failures always notify, even when CI owns success notices.
+  notify "$(deploy_failure_message "${status}")" false
   exit "${status}"
 }
 trap on_deploy_error ERR
@@ -232,6 +245,10 @@ echo "==> Pruning old releases..."
 prune_releases "${STAGE_ROOT}/releases"     "${RELEASE_ID}" "${BLUE_ID}" "${GREEN_ID}"
 prune_releases "{{ deploy_releases_root }}" "${RELEASE_ID}"
 
-notify "✅ <b>[${DEPLOY_ENV}] ${APP_DISPLAY_NAME} deployed</b>\n$(deploy_summary)" true
+# CI publishes the canonical successful deployment summary. Consumers can opt
+# into this host-side success message for deployments that are not CI-driven.
+if [[ "${HOST_DEPLOY_NOTIFY}" == "true" ]]; then
+  notify "$(deploy_success_message)" true
+fi
 trap - ERR
 echo "==> Done."

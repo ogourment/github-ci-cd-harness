@@ -83,6 +83,11 @@ Override the prefix with
 `CI_CD_REMOTE_ENV_PREFIX` only when the remote helper already expects another
 name.
 
+By default, a successful fast deploy produces both a host-side message and the
+CI summary. Set `CI_CD_HOST_DEPLOY_NOTIFY=false` when CI is the canonical
+notifier; deployment failures still notify from the host. The CI summary reads
+the active blue/green color from the verified health response when available.
+
 See [migrating-to-gitlab-ci-cd-harness](docs/migrating-to-gitlab-ci-cd-harness.md).
 
 ## Compatibility

@@ -103,9 +103,26 @@ variables:
       printf '%s' "$1" | sed -e 's/&/\\&amp;/g' -e 's/</\\&lt;/g' -e 's/>/\\&gt;/g'
     }
 
+    active_color=""
+    health_file="/tmp/${CI_CD_OTP_APP:-app}_${CI_CD_DEPLOY_TARGET}_health.json"
+    if [ -s "$health_file" ]; then
+      active_color="$(sed -nE 's/.*"color":"([^"]+)".*/\1/p' "$health_file" | tail -n 1)"
+    fi
+
+    color_chip() {
+      case "$1" in
+        blue) printf '🔵 blue' ;;
+        green) printf '🟢 green' ;;
+        *) printf '%s' "$1" ;;
+      esac
+    }
+
     message="${deploy_icon} <b>[${CI_CD_DEPLOY_TARGET}] ${CI_CD_APP_NAME} <code>v${app_version}</code> ${deploy_status}</b>"
     message+=$'\n'"Pipeline: <code>${pipeline_id}</code> job <code>${job_id}</code>"
     message+=$'\n'"Release: <code>${release_id}</code>"
+    if [ -n "$active_color" ]; then
+      message+=$'\n'"Active color: $(html_escape "$(color_chip "$active_color")")"
+    fi
     message+=$'\n'"Actor: <code>${actor}</code>"
     message+=$'\n'"Timing: deploy=<code>$(duration_label "${deploy_seconds}")</code> wait=<code>$(duration_label "${wait_seconds}")</code> total=<code>$(duration_label "${total_seconds}")</code>"
 
