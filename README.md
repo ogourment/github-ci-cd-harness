@@ -23,10 +23,10 @@ Include this repository in consuming pipelines:
 ```yaml
 include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.7
+    ref: v0.6.8
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.7
+    ref: v0.6.8
     file: /templates/cd.yml
 ```
 

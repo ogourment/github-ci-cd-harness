@@ -254,6 +254,8 @@ acceptance_gate:
 acceptance_pages:
   stage: verify
   image: alpine:3.20
+  pages:
+    publish: public
   needs:
     - job: acceptance_evidence
       artifacts: true

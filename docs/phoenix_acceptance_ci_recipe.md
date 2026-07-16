@@ -70,7 +70,10 @@ variables:
 
 ## 4. Publish the evidence site
 
-If the project does not have its own `pages` job, use the template's `acceptance_pages` job.
+If the project does not have its own `pages` job, use the template's
+`acceptance_pages` job. It declares `pages.publish: public`, so GitLab publishes
+the downloaded evidence artifact even though the job is not literally named
+`pages`.
 
 If the project already has a `pages` job, keep it and depend on `acceptance_evidence` artifacts:
 
