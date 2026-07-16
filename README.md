@@ -24,7 +24,9 @@ include:
 - `acceptance_evidence`
 - `acceptance_gate`
 - `acceptance_pages`
-- `acceptance_notify`
+
+Acceptance notifications are sent from `acceptance_gate`'s non-blocking
+`after_script`, once evidence is available.
 
 The package also provides `scripts/atdd_remote_eval.sh` for acceptance tests
 that need to run a release-scoped Elixir expression over SSH against a deployed
@@ -176,5 +178,8 @@ and release artifact/cache hygiene for deploy jobs, see
 
 - Evidence artifacts and site output are published even when acceptance fails.
 - `acceptance_gate` is the explicit blocking gate.
-- `acceptance_notify` always runs in `production` stage and can be configured to
-  send notifications directly through Telegram Bot API or via `ACCEPTANCE_NOTIFY_COMMAND`.
+- The acceptance gate sends a notification after it has consumed the evidence.
+  This avoids a no-op notification when an earlier staging deploy fails and is
+  retried in the same pipeline. Notification transport is best-effort and never
+  changes the acceptance-gate result. Configure it with Telegram Bot API
+  variables or `ACCEPTANCE_NOTIFY_COMMAND`.

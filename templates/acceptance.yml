@@ -198,33 +198,19 @@ acceptance_gate:
       : "${ACCEPTANCE_EVIDENCE_DIR:=tmp/atdd}"
       : "${ACCEPTANCE_MIX_ENV:=test}"
       MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.gate "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md"
-
-acceptance_pages:
-  stage: verify
-  image: alpine:3.20
-  needs:
-    - job: acceptance_evidence
-      artifacts: true
-  script:
-    - ': "${ACCEPTANCE_PUBLIC_DIR:=public}"'
-    - test -f "$ACCEPTANCE_PUBLIC_DIR/index.html"
-    - find "$ACCEPTANCE_PUBLIC_DIR" -maxdepth 3 -type f | sort
-  artifacts:
-    paths:
-      - public/
-    expire_in: 1 month
-
-acceptance_notify:
-  stage: production
-  image: alpine:3.20
-  needs:
-    - job: acceptance_evidence
-      artifacts: true
-    - job: acceptance_pages
-      artifacts: false
-  script:
+  # The notifier belongs to the gate, rather than a standalone `when: always`
+  # job. A failed deploy can skip evidence; if that deploy is retried, GitLab
+  # schedules this gate once evidence exists, so a notification is never
+  # consumed prematurely by an empty artifact.
+  after_script:
     - |
-      set -euo pipefail
+      # Notification transport must not change the gate result, even in
+      # projects that set AFTER_SCRIPT_IGNORE_ERRORS=false.
+      set +e
+      if [ "${CI_JOB_STATUS:-}" = "canceled" ]; then
+        exit 0
+      fi
+
       : "${ACCEPTANCE_EVIDENCE_DIR:=tmp/atdd}"
       : "${ACCEPTANCE_TELEGRAM_MESSAGE_PATH:=acceptance_summary.txt}"
       acceptance_message_path="${ACCEPTANCE_EVIDENCE_DIR%/}/${ACCEPTANCE_TELEGRAM_MESSAGE_PATH}"
@@ -258,6 +244,24 @@ acceptance_notify:
       else
         cat "$acceptance_message_path"
       fi
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      when: always
+
+      acceptance_notify_exit_code="$?"
+      if [ "$acceptance_notify_exit_code" -ne 0 ]; then
+        echo "acceptance notify failed with exit code $acceptance_notify_exit_code; preserving the acceptance gate result"
+      fi
+      exit 0
+
+acceptance_pages:
+  stage: verify
+  image: alpine:3.20
+  needs:
+    - job: acceptance_evidence
+      artifacts: true
+  script:
+    - ': "${ACCEPTANCE_PUBLIC_DIR:=public}"'
+    - test -f "$ACCEPTANCE_PUBLIC_DIR/index.html"
+    - find "$ACCEPTANCE_PUBLIC_DIR" -maxdepth 3 -type f | sort
+  artifacts:
+    paths:
+      - public/
+    expire_in: 1 month

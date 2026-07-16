@@ -1,5 +1,6 @@
 include:
   - local: "/templates/cd.yml"
+  - local: "/templates/acceptance.yml"
 
 stages:
   - build
@@ -19,5 +20,44 @@ template_smoke:
   stage: build
   script:
     - test -f templates/cd.yml
+    - test -f templates/acceptance.yml
     - awk '/^\.ci_cd_deploy_notify:/ {inside=1; next} /^\.ci_cd_fetch_harness:/ {exit} inside && /set \+e/ {non_blocking=1} inside && /exit 0/ {zero_exit=1} END {exit !(non_blocking && zero_exit)}' templates/cd.yml
     - sh -n scripts/staging_release_smoke.sh
+
+# This minimal consumer proves that the notification is attached to the gate.
+# If a deploy is retried, GitLab schedules this gate only after evidence exists.
+acceptance_evidence:
+  stage: verify
+  image: alpine:3.20
+  needs: []
+  script:
+    - mkdir -p tmp/atdd public
+    - printf '%s\n' 'acceptance summary' > tmp/atdd/acceptance_summary.txt
+    - printf '%s\n' 'ATDD_TEST_EXIT_CODE=0' 'ACCEPTANCE_SITE_EXIT_CODE=0' 'ATDD_GATE_EXIT_CODE=0' > tmp/atdd/status.env
+    - touch public/index.html
+  artifacts:
+    paths: [tmp/atdd/, public/]
+    reports:
+      dotenv: tmp/atdd/status.env
+
+acceptance_gate:
+  stage: verify
+  image: alpine:3.20
+  needs:
+    - job: acceptance_evidence
+      artifacts: true
+  variables:
+    ACCEPTANCE_NOTIFY_COMMAND: 'cp "$ACCEPTANCE_MESSAGE_PATH" notification.txt'
+  script:
+    - test -s tmp/atdd/acceptance_summary.txt
+  artifacts:
+    paths: [notification.txt]
+
+notification_proof:
+  stage: production
+  image: alpine:3.20
+  needs:
+    - job: acceptance_gate
+      artifacts: true
+  script:
+    - test "$(cat notification.txt)" = 'acceptance summary'
