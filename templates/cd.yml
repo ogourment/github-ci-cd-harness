@@ -12,9 +12,6 @@ variables:
   CI_CD_REMOTE_RELEASES_ROOT: "/home/deploy/releases"
   CI_CD_DEPLOY_TIMEOUT_SECONDS: "120"
 
-default:
-  allow_failure: false
-
 .ci_cd_deploy_notify: &ci_cd_deploy_notify
   - |
     set -euo pipefail
