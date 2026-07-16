@@ -35,6 +35,7 @@ Phoenix release.
 - `build_release`
 - `release_tag` (off by default; manual)
 - `deploy_staging`
+- `staging_release_smoke`
 - `deploy_prod` (off by default)
 - `deploy_staging_ansible` (off by default)
 - `deploy_prod_ansible` (off by default)
@@ -42,12 +43,24 @@ Phoenix release.
 The job dependency chain encoded by the template is:
 
 ```text
-build_release -> deploy_staging -> acceptance_evidence -> acceptance_gate -> deploy_prod
+build_release -> deploy_staging -> staging_release_smoke -> deploy_prod
+                              -> acceptance_evidence -> acceptance_gate -> deploy_prod
 ```
 
 Production deploys remain optional. Set `CI_CD_ENABLE_PROD_DEPLOY=true` in a
 consumer to expose the manual production deploy job. Optional manual deploy
 jobs are non-blocking, so a green pipeline stays green when they are not run.
+
+## Staging browser smoke
+
+`staging_release_smoke` is enabled by default for a staging deployment. It
+requests `STAGING_ENVIRONMENT_URL` after deployment, requires a 2xx response,
+and verifies that the response is an HTML document. This catches failures in
+the root layout or page rendering that a JSON health endpoint cannot see.
+
+Set `CI_CD_STAGING_SMOKE_URL` when the public browser URL differs from
+`STAGING_ENVIRONMENT_URL`. Consumers with no browser surface can explicitly
+set `CI_CD_ENABLE_STAGING_SMOKE=false`.
 
 ## SemVer release tags
 

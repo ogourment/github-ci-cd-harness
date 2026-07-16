@@ -4,6 +4,7 @@ include:
 stages:
   - build
   - deploy
+  - verify
   - production
 
 default:
@@ -13,3 +14,9 @@ variables:
   CI_CD_ENABLE_STAGING_DEPLOY: "false"
   CI_CD_ENABLE_RELEASE_TAG: "true"
   CI_CD_RELEASE_VERSION_COMMAND: "cat VERSION"
+
+template_smoke:
+  stage: build
+  script:
+    - test -f templates/cd.yml
+    - sh -n scripts/staging_release_smoke.sh

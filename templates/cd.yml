@@ -11,6 +11,12 @@ variables:
   CI_CD_RELEASE_ARTIFACT_KIND: "directory"
   CI_CD_REMOTE_RELEASES_ROOT: "/home/deploy/releases"
   CI_CD_DEPLOY_TIMEOUT_SECONDS: "120"
+  # Exercise the deployed browser surface as well as its machine health
+  # endpoint.  Consumers can disable this only when they deliberately do not
+  # expose an HTML staging surface.
+  CI_CD_ENABLE_STAGING_SMOKE: "true"
+  CI_CD_STAGING_SMOKE_URL: "$STAGING_ENVIRONMENT_URL"
+  CI_CD_STAGING_SMOKE_TIMEOUT_SECONDS: "30"
 
 .ci_cd_deploy_notify: &ci_cd_deploy_notify
   - |
@@ -305,6 +311,21 @@ deploy_staging:
       when: on_success
     - when: never
 
+staging_release_smoke:
+  stage: verify
+  image: alpine:3.21
+  needs:
+    - job: deploy_staging
+      artifacts: false
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - sh .gitlab-ci-cd-harness/scripts/staging_release_smoke.sh
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_STAGING_DEPLOY == "true" && $CI_CD_ENABLE_STAGING_SMOKE != "false"'
+      when: on_success
+    - when: never
+
 deploy_prod:
   extends: .ci_cd_deploy_template
   stage: production
@@ -314,6 +335,9 @@ deploy_prod:
     - job: deploy_staging
       artifacts: false
     - job: acceptance_gate
+      artifacts: false
+      optional: true
+    - job: staging_release_smoke
       artifacts: false
       optional: true
   variables:
