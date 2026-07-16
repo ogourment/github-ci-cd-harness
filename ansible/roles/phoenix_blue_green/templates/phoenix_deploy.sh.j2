@@ -21,6 +21,7 @@ NGINX_UPSTREAM_FILE="{{ nginx_upstream_include }}"
 NGINX_UPSTREAM_NAME="{{ nginx_upstream_name }}"
 CURRENT_COLOR_FILE="{{ app_current_color_file }}"
 ENV_FILE_BASE="{{ app_env_file }}"
+RELEASE_ID_ENV_VAR="{{ phoenix_release_id_env_var }}"
 
 PORT_BLUE="{{ app_port_blue }}"
 PORT_GREEN="{{ app_port_green }}"
@@ -123,6 +124,17 @@ done
 
 echo "==> Pointing ${TARGET_COLOR} → ${RELEASE_ID}"
 ln -sfn "${RELEASE_DIR}" "${TARGET_LINK}"
+
+# The systemd unit reads its environment from the per-slot file, not this
+# deploy process. Keep the release identifier alongside the static slot
+# metadata before starting the target so /health can attest the cutover.
+TARGET_ENV_FILE="${ENV_FILE_BASE}_${TARGET_COLOR}"
+tmp_env="$(mktemp)"
+grep -v "^${RELEASE_ID_ENV_VAR}=" "${TARGET_ENV_FILE}" > "${tmp_env}" || true
+printf '%s="%s"\n' "${RELEASE_ID_ENV_VAR}" "${RELEASE_ID}" >> "${tmp_env}"
+chown "{{ deploy_user }}:{{ deploy_user }}" "${tmp_env}"
+chmod 600 "${tmp_env}"
+mv "${tmp_env}" "${TARGET_ENV_FILE}"
 
 if [[ "${RUN_MIGRATIONS}" == "migrate" ]]; then
   echo "==> Running migrations (must be backward-compatible with ${CURRENT_COLOR})..."

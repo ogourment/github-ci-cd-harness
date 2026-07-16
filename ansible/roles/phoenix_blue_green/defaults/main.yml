@@ -34,6 +34,9 @@ nginx_upstream_include: "/etc/nginx/conf.d/{{ app_name }}_upstream.conf"
 # defaults unless the app already reads a specific name (ecojeux: ECOJEUX_*).
 phoenix_env_indicator_var: "DEPLOY_ENV"
 phoenix_color_env_var: "DEPLOY_COLOR"
+# Written into the target slot immediately before it starts, so the deployed
+# health endpoint can prove which immutable release served the response.
+phoenix_release_id_env_var: "DEPLOY_RELEASE_ID"
 deploy_env: "production"
 
 # Extra, app-specific env lines appended verbatim to each color's env file
