@@ -23,6 +23,12 @@ template_smoke:
     - test -f templates/acceptance.yml
     - awk '/^\.ci_cd_deploy_notify:/ {inside=1; next} /^\.ci_cd_fetch_harness:/ {exit} inside && /set \+e/ {non_blocking=1} inside && /exit 0/ {zero_exit=1} END {exit !(non_blocking && zero_exit)}' templates/cd.yml
     - sh -n scripts/staging_release_smoke.sh
+    - sh -n scripts/verify_health_identity.sh
+    - printf '%s\n' '{"version":"1.2.3","release_id":"v1.2.3-abcdef12-99","pipeline_id":"99"}' > /tmp/health.json
+    - scripts/verify_health_identity.sh /tmp/health.json 1.2.3 v1.2.3-abcdef12-99 99
+    - '! scripts/verify_health_identity.sh /tmp/health.json 1.2.3 v1.2.3-abcdef12-99 100 2>/tmp/identity-error'
+    - grep -q 'expected.*pipeline_id=100' /tmp/identity-error
+    - grep -q 'actual.*pipeline_id=99' /tmp/identity-error
 
 # This minimal consumer proves that the notification is attached to the gate.
 # If a deploy is retried, GitLab schedules this gate only after evidence exists.

@@ -37,6 +37,7 @@ phoenix_color_env_var: "DEPLOY_COLOR"
 # Written into the target slot immediately before it starts, so the deployed
 # health endpoint can prove which immutable release served the response.
 phoenix_release_id_env_var: "DEPLOY_RELEASE_ID"
+phoenix_pipeline_id_env_var: "DEPLOY_CI_PIPELINE_ID"
 deploy_env: "production"
 
 # Extra, app-specific env lines appended verbatim to each color's env file

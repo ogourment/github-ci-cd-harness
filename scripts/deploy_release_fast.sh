@@ -232,9 +232,10 @@ case "$CI_CD_RELEASE_ARTIFACT_KIND" in
 esac
 
 if [ -n "${CI_CD_HEALTH_URL:-}" ]; then
-  retry curl -fsSL "$CI_CD_HEALTH_URL" | tee "/tmp/${CI_CD_OTP_APP}_${target}_health.json"
-  grep -q "\"version\":\"${version}\"" "/tmp/${CI_CD_OTP_APP}_${target}_health.json"
-  grep -q "\"release_id\":\"${release_id}\"" "/tmp/${CI_CD_OTP_APP}_${target}_health.json"
+  health_file="/tmp/${CI_CD_OTP_APP}_${target}_health.json"
+  retry curl -fsSL "$CI_CD_HEALTH_URL" | tee "$health_file"
+  .gitlab-ci-cd-harness/scripts/verify_health_identity.sh \
+    "$health_file" "$version" "$release_id" "${CI_PIPELINE_ID:-unknown}"
 fi
 
 if [ -n "${CI_CD_WEBSOCKET_BASE_URL:-}" ] && [ -f scripts/check_live_websocket.py ]; then

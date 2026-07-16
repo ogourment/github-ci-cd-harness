@@ -22,6 +22,7 @@ NGINX_UPSTREAM_NAME="{{ nginx_upstream_name }}"
 CURRENT_COLOR_FILE="{{ app_current_color_file }}"
 ENV_FILE_BASE="{{ app_env_file }}"
 RELEASE_ID_ENV_VAR="{{ phoenix_release_id_env_var }}"
+PIPELINE_ID_ENV_VAR="{{ phoenix_pipeline_id_env_var }}"
 
 PORT_BLUE="{{ app_port_blue }}"
 PORT_GREEN="{{ app_port_green }}"
@@ -52,6 +53,18 @@ APP_VERSION="$(metadata_value APP_VERSION unknown)"
 ACTOR="$(metadata_value DEPLOY_ACTOR "${USER:-unknown}")"
 CI_PIPELINE_ID="$(metadata_value CI_PIPELINE_ID "${CI_PIPELINE_ID:-unknown}")"
 HOST_DEPLOY_NOTIFY="$(metadata_value HOST_DEPLOY_NOTIFY true)"
+
+if [[ "${CI_PIPELINE_ID}" == "unknown" || -z "${CI_PIPELINE_ID}" ]]; then
+  release_pipeline_id="${RELEASE_ID##*-}"
+  if [[ "${release_pipeline_id}" =~ ^[0-9]+$ ]]; then
+    CI_PIPELINE_ID="${release_pipeline_id}"
+  fi
+fi
+
+if [[ "${CI_PIPELINE_ID}" == "unknown" || -z "${CI_PIPELINE_ID}" ]]; then
+  echo "ERROR: cannot determine pipeline identity from deploy metadata or release ${RELEASE_ID}" >&2
+  exit 1
+fi
 
 html_escape() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 
@@ -130,8 +143,9 @@ ln -sfn "${RELEASE_DIR}" "${TARGET_LINK}"
 # metadata before starting the target so /health can attest the cutover.
 TARGET_ENV_FILE="${ENV_FILE_BASE}_${TARGET_COLOR}"
 tmp_env="$(mktemp)"
-grep -v "^${RELEASE_ID_ENV_VAR}=" "${TARGET_ENV_FILE}" > "${tmp_env}" || true
+grep -Ev "^(${RELEASE_ID_ENV_VAR}|${PIPELINE_ID_ENV_VAR})=" "${TARGET_ENV_FILE}" > "${tmp_env}" || true
 printf '%s="%s"\n' "${RELEASE_ID_ENV_VAR}" "${RELEASE_ID}" >> "${tmp_env}"
+printf '%s="%s"\n' "${PIPELINE_ID_ENV_VAR}" "${CI_PIPELINE_ID}" >> "${tmp_env}"
 chown "{{ deploy_user }}:{{ deploy_user }}" "${tmp_env}"
 chmod 600 "${tmp_env}"
 mv "${tmp_env}" "${TARGET_ENV_FILE}"
@@ -159,18 +173,20 @@ systemctl restart "${TARGET_SERVICE}"
 EXPECTED_VERSION="$(ls "${RELEASE_DIR}/releases/" 2>/dev/null | head -1 || true)"
 [[ -n "${EXPECTED_VERSION}" ]] || { echo "ERROR: cannot determine release version" >&2; exit 1; }
 
-echo "==> Health-checking http://127.0.0.1:${TARGET_PORT}${HEALTH_PATH} (version=${EXPECTED_VERSION}, color=${TARGET_COLOR})..."
+echo "==> Health-checking http://127.0.0.1:${TARGET_PORT}${HEALTH_PATH} (version=${EXPECTED_VERSION}, color=${TARGET_COLOR}, release=${RELEASE_ID}, pipeline=${CI_PIPELINE_ID})..."
 deadline=$(( $(date +%s) + HEALTH_TIMEOUT_SEC ))
 while true; do
   resp="$(curl -sf --max-time 2 "http://127.0.0.1:${TARGET_PORT}${HEALTH_PATH}" 2>/dev/null || true)"
   if [[ -n "${resp}" ]]; then
-    actual_version="$(printf '%s' "${resp}" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)"
-    actual_color="$(printf '%s' "${resp}" | grep -o '"color":"[^"]*"' | cut -d'"' -f4)"
-    if [[ "${actual_version}" == "${EXPECTED_VERSION}" && "${actual_color}" == "${TARGET_COLOR}" ]]; then
-      echo "    ${TARGET_COLOR} healthy: version=${actual_version}, color=${actual_color}"
+    actual_version="$(printf '%s' "${resp}" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || true)"
+    actual_color="$(printf '%s' "${resp}" | grep -o '"color":"[^"]*"' | cut -d'"' -f4 || true)"
+    actual_release_id="$(printf '%s' "${resp}" | grep -o '"release_id":"[^"]*"' | cut -d'"' -f4 || true)"
+    actual_pipeline_id="$(printf '%s' "${resp}" | grep -o '"pipeline_id":"[^"]*"' | cut -d'"' -f4 || true)"
+    if [[ "${actual_version}" == "${EXPECTED_VERSION}" && "${actual_color}" == "${TARGET_COLOR}" && "${actual_release_id}" == "${RELEASE_ID}" && "${actual_pipeline_id}" == "${CI_PIPELINE_ID}" ]]; then
+      echo "    ${TARGET_COLOR} healthy: version=${actual_version}, color=${actual_color}, release=${actual_release_id}, pipeline=${actual_pipeline_id}"
       break
     fi
-    echo "    /health mismatch (version=${actual_version:-?}, color=${actual_color:-?}); retrying..."
+    echo "    /health identity mismatch; expected version=${EXPECTED_VERSION}, color=${TARGET_COLOR}, release=${RELEASE_ID}, pipeline=${CI_PIPELINE_ID}; got version=${actual_version:-?}, color=${actual_color:-?}, release=${actual_release_id:-?}, pipeline=${actual_pipeline_id:-?}; retrying..."
   fi
   if [[ $(date +%s) -ge ${deadline} ]]; then
     echo "ERROR: ${TARGET_COLOR} failed health check after ${HEALTH_TIMEOUT_SEC}s; ${CURRENT_COLOR} still live." >&2

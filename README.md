@@ -12,10 +12,10 @@ Include this repository in consuming pipelines:
 ```yaml
 include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.3.0
+    ref: v0.6.6
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.3.0
+    ref: v0.6.6
     file: /templates/cd.yml
 ```
 
@@ -82,6 +82,27 @@ for the tag push.
 
 Consumers provide app identity, host variables, and secrets. The harness owns the
 deploy job body and generic deploy scripts.
+
+### Health identity contract
+
+Fast and Ansible-managed blue/green deploys require the deployed health JSON to
+identify the exact artifact before nginx cutover. The response must contain
+matching `version`, `release_id`, and `pipeline_id`; the on-host check also
+requires the expected blue/green `color`. Identity mismatches report expected
+and actual values and leave the previous color live.
+
+The Ansible role writes release and pipeline identity into the target slot's
+environment before systemd starts it. Configure the variable names that the
+application's health payload reads:
+
+```yaml
+phoenix_release_id_env_var: "MY_APP_RELEASE_ID"
+phoenix_pipeline_id_env_var: "MY_APP_CI_PIPELINE_ID"
+```
+
+Both `/health` and any application-specific `/health/deep` endpoint should
+extend the same health payload so either endpoint reports identical deployment
+identity.
 
 Use `STAGING_HOST` / `PROD_HOST` for public environment hostnames used by
 health and websocket checks. Set `STAGING_SSH_HOST` / `PROD_SSH_HOST` only when
