@@ -2,6 +2,17 @@
 
 Reusable GitLab CI/CD templates and recipes for Phoenix/Elixir delivery pipelines.
 
+## Local resource preflight
+
+`scripts/resource_preflight.sh` is a lightweight Linux guard for local compile,
+browser, and concurrent test commands. It reads `MemAvailable` and swap use,
+warns when headroom is low, and exits with status 2 before critical memory
+pressure can push a workstation into swap thrashing. Consuming repositories can
+invoke it before intensive commands and set `RESOURCE_PREFLIGHT=off` for an
+explicit one-off bypass.
+
+Run its fixture-based test with `tests/resource_preflight_test.sh`.
+
 This repository is the renamed successor to `olivierg/gitlab-ci-harness` and the
 broader successor to `olivierg/acceptance-gitlab-ci`.
 
@@ -12,10 +23,10 @@ Include this repository in consuming pipelines:
 ```yaml
 include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.6
+    ref: v0.6.7
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.6
+    ref: v0.6.7
     file: /templates/cd.yml
 ```
 
