@@ -12,6 +12,9 @@ variables:
   CI_CD_REMOTE_RELEASES_ROOT: "/home/deploy/releases"
   CI_CD_DEPLOY_TIMEOUT_SECONDS: "120"
 
+default:
+  allow_failure: false
+
 .ci_cd_deploy_notify: &ci_cd_deploy_notify
   - |
     set -euo pipefail
@@ -269,9 +272,6 @@ release_tag:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_RELEASE_TAG == "true"'
       when: manual
-      # Tagging is an explicit optional release action; it must not hold the
-      # production stage open after staging acceptance has passed.
-      allow_failure: true
     - when: never
 
 .ci_cd_deploy_template:
@@ -334,7 +334,6 @@ deploy_prod:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_PROD_DEPLOY == "true"'
       when: manual
-      allow_failure: true
     - when: never
 
 .ci_cd_ansible_deploy_template:
@@ -361,7 +360,6 @@ deploy_staging_ansible:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_ANSIBLE_DEPLOY_JOBS == "true"'
       when: manual
-      allow_failure: true
     - when: never
 
 deploy_prod_ansible:
@@ -374,5 +372,4 @@ deploy_prod_ansible:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_ANSIBLE_DEPLOY_JOBS == "true"'
       when: manual
-      allow_failure: true
     - when: never
