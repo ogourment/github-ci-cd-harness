@@ -168,6 +168,8 @@ variables:
       printf '%b\n' "${message}"
     fi
 
+    exit 0
+
 
 .ci_cd_fetch_harness: &ci_cd_fetch_harness
   - |

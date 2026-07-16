@@ -19,5 +19,5 @@ template_smoke:
   stage: build
   script:
     - test -f templates/cd.yml
-    - awk '/^\.ci_cd_deploy_notify:/ {inside=1; next} /^\.ci_cd_fetch_harness:/ {exit} inside && /set \+e/ {found=1} END {exit !found}' templates/cd.yml
+    - awk '/^\.ci_cd_deploy_notify:/ {inside=1; next} /^\.ci_cd_fetch_harness:/ {exit} inside && /set \+e/ {non_blocking=1} inside && /exit 0/ {zero_exit=1} END {exit !(non_blocking && zero_exit)}' templates/cd.yml
     - sh -n scripts/staging_release_smoke.sh
