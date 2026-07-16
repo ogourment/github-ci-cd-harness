@@ -20,7 +20,11 @@ variables:
 
 .ci_cd_deploy_notify: &ci_cd_deploy_notify
   - |
-    set -euo pipefail
+    # A deployment has already succeeded or failed by the time this hook runs.
+    # Reporting must never turn a successful release into a failed pipeline.
+    set +e
+    set +u
+    set +o pipefail
 
     : "${CI_CD_APP_NAME:=${CI_PROJECT_NAME:-project}}"
     : "${CI_CD_DEPLOY_TARGET:=unknown}"
