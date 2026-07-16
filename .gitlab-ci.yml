@@ -47,7 +47,7 @@ acceptance_gate:
     - job: acceptance_evidence
       artifacts: true
   variables:
-    ACCEPTANCE_NOTIFY_COMMAND: 'cp "$ACCEPTANCE_MESSAGE_PATH" notification.txt'
+    ACCEPTANCE_NOTIFY_COMMAND: 'cp "$$ACCEPTANCE_MESSAGE_PATH" notification.txt'
   script:
     - test -s tmp/atdd/acceptance_summary.txt
   artifacts:
