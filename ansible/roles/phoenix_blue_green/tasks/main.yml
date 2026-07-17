@@ -22,6 +22,22 @@
     group: "{{ deploy_user }}"
     mode: "0755"
 
+- name: Validate optional uploads configuration
+  ansible.builtin.assert:
+    that:
+      - (phoenix_uploads_dir | length > 0) == (phoenix_uploads_env_var | length > 0)
+      - phoenix_uploads_env_var | length == 0 or phoenix_uploads_env_var is match('^[A-Z][A-Z0-9_]*$')
+    quiet: true
+
+- name: Ensure shared uploads directory exists
+  ansible.builtin.file:
+    path: "{{ phoenix_uploads_dir }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0755"
+  when: phoenix_uploads_dir | length > 0
+
 - name: Install deploy script
   ansible.builtin.template:
     src: phoenix_deploy.sh.j2

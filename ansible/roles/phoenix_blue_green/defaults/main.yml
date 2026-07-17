@@ -44,6 +44,11 @@ deploy_env: "production"
 # (BREVO/STRIPE/... for ecojeux). Multi-line string; rendered as-is.
 phoenix_env_extra: ""
 
+# Optional shared writable directory exposed to the release through a named
+# environment variable. Both values must be set together by consumers.
+phoenix_uploads_dir: ""
+phoenix_uploads_env_var: ""
+
 # Optional: after a successful cutover, eval a release hook to record the
 # deployment. Set true and provide release_migrate_module.record_deployment/4.
 phoenix_deploy_record: false

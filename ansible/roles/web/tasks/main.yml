@@ -8,6 +8,13 @@
       - nginx_upstream_name is defined and nginx_upstream_name | length > 0
     quiet: true
 
+- name: Validate optional nginx uploads configuration
+  ansible.builtin.assert:
+    that:
+      - (nginx_uploads_dir | length > 0) == (nginx_uploads_url_prefix | length > 0)
+      - nginx_uploads_url_prefix | length == 0 or nginx_uploads_url_prefix is match('^/[^/].*[^/]$|^/[^/]$')
+    quiet: true
+
 - name: Install nginx and Certbot
   ansible.builtin.apt:
     pkg: "{{ web_packages }}"

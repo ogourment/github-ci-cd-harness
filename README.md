@@ -13,6 +13,14 @@ explicit one-off bypass.
 
 Run its fixture-based test with `tests/resource_preflight_test.sh`.
 
+The `phoenix_blue_green` and `web` Ansible roles can share persistent uploads
+across release colors. Set `phoenix_uploads_dir` with
+`phoenix_uploads_env_var`, and set the same directory with
+`nginx_uploads_dir` plus `nginx_uploads_url_prefix`. The roles create the
+writable directory, expose it to both color services, and serve it directly
+through nginx with write methods denied.
+Run `tests/ansible_uploads_contract_test.sh` to verify this role contract.
+
 This repository is the renamed successor to `olivierg/gitlab-ci-harness` and the
 broader successor to `olivierg/acceptance-gitlab-ci`.
 
@@ -23,10 +31,10 @@ Include this repository in consuming pipelines:
 ```yaml
 include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.8
+    ref: v0.6.9
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.8
+    ref: v0.6.9
     file: /templates/cd.yml
 ```
 

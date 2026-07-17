@@ -9,6 +9,15 @@ server {
     }
     {% else %}
     # HTTP-only configuration used while Certbot obtains the initial certificate.
+    {% if nginx_uploads_dir %}
+    location ^~ {{ nginx_uploads_url_prefix }}/ {
+        alias {{ nginx_uploads_dir }}/;
+        autoindex off;
+        add_header X-Content-Type-Options nosniff always;
+        limit_except GET HEAD { deny all; }
+    }
+    {% endif %}
+
     location / {
         proxy_pass http://{{ nginx_upstream_name }};
         proxy_set_header Host $host;
@@ -104,6 +113,15 @@ server {
         access_log off;
         log_not_found off;
         return 404;
+    }
+    {% endif %}
+
+    {% if nginx_uploads_dir %}
+    location ^~ {{ nginx_uploads_url_prefix }}/ {
+        alias {{ nginx_uploads_dir }}/;
+        autoindex off;
+        add_header X-Content-Type-Options nosniff always;
+        limit_except GET HEAD { deny all; }
     }
     {% endif %}
 

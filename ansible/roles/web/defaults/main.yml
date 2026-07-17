@@ -11,3 +11,8 @@ server_aliases: []
 nginx_legacy_site_names: []
 nginx_legacy_upstream_includes: []
 nginx_drop_scanner_probes: true
+
+# Optional persistent static uploads served directly by nginx. Set both values
+# together; the URL prefix starts with a slash and omits the trailing slash.
+nginx_uploads_dir: ""
+nginx_uploads_url_prefix: ""
