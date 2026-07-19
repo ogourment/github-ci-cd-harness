@@ -273,5 +273,5 @@ acceptance_pages:
     - find "$ACCEPTANCE_PUBLIC_DIR" -maxdepth 3 -type f | sort
   artifacts:
     paths:
-      - public/
+      - public
     expire_in: 1 month
