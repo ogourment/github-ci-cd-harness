@@ -23,9 +23,9 @@ template_smoke:
     - test -f templates/acceptance.yml
     - awk '/^\.ci_cd_deploy_notify:/ {inside=1; next} /^\.ci_cd_fetch_harness:/ {exit} inside && /set \+e/ {non_blocking=1} inside && /exit 0/ {zero_exit=1} END {exit !(non_blocking && zero_exit)}' templates/cd.yml
     - >-
-      awk '/^acceptance_pages:/ {inside=1; next} inside && /^  pages:/ {pages=1}
-      inside && /^    publish: public/ {publish=1} inside && /^[^ ]/ {exit}
-      END {exit !(pages && publish)}' templates/acceptance.yml
+      awk '/^pages:/ {inside=1; next} inside && /^    paths:/ {paths=1}
+      inside && /^      - public/ {publish=1} inside && /^[^ ]/ {exit}
+      END {exit !(paths && publish)}' templates/acceptance.yml
     - sh -n scripts/staging_release_smoke.sh
     - sh -n scripts/verify_health_identity.sh
     - bash -n scripts/resource_preflight.sh tests/resource_preflight_test.sh
