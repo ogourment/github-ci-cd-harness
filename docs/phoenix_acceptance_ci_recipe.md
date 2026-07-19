@@ -205,8 +205,8 @@ The generated message starts with a status icon and includes:
 - scenario and step counts
 - test and gate exit codes
 - failure count
+- up to five HTML-safe failure previews (scenario, message, and location) when tests fail
 - elapsed time
-- failure count on the Exit line
 
 Example shape:
 

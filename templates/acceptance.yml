@@ -90,6 +90,11 @@ acceptance_evidence:
         atdd_failure_count="${atdd_failure_count:-0}"
       fi
 
+      atdd_failure_previews=""
+      if [ -s "$ACCEPTANCE_EVIDENCE_DIR/failure_previews.json" ]; then
+        atdd_failure_previews="$(MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.failure_previews "$ACCEPTANCE_EVIDENCE_DIR/failure_previews.json" 2>/dev/null || true)"
+      fi
+
       if [ "$ACCEPTANCE_TEST_EXIT_CODE" -eq 0 ] && [ "$ACCEPTANCE_SITE_EXIT_CODE" -eq 0 ] && [ "$ACCEPTANCE_GATE_EXIT_CODE" -eq 0 ]; then
         atdd_status_icon="✅"
         atdd_status_word="passed"
@@ -165,6 +170,9 @@ acceptance_evidence:
         fi
         echo "Evidence: ${atdd_scenarios} scenario(s), ${atdd_steps} step(s)"
         echo "Exit: test <code>${ACCEPTANCE_TEST_EXIT_CODE}</code>, site <code>${ACCEPTANCE_SITE_EXIT_CODE}</code>, gate <code>${ACCEPTANCE_GATE_EXIT_CODE}</code>, failures <code>${atdd_failure_count}</code>"
+        if [ -n "$atdd_failure_previews" ]; then
+          printf '%s\n' "$atdd_failure_previews"
+        fi
         echo "Finished in <code>${atdd_minutes}m ${atdd_seconds}s</code>."
       } > "$acceptance_message_path"
 
