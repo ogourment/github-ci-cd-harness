@@ -46,4 +46,18 @@ wait "$holder_pid"
 holder_pid=''
 RESOURCE_LOCK_BACKEND=mkdir RESOURCE_LOCK_DIR="$fixtures" "$script" portable-command -- true
 
+RESOURCE_LOCK_BACKEND=mkdir RESOURCE_LOCK_DIR="$fixtures" "$script" waiting-command -- sleep 1 &
+holder_pid=$!
+for _ in $(seq 1 50); do
+  [[ -s "$fixtures/waiting-command.lockdir/holder" ]] && break
+  sleep 0.02
+done
+wait_output="$(
+  RESOURCE_INTENSIVE_LOCK_WAIT=1 RESOURCE_LOCK_BACKEND=mkdir RESOURCE_LOCK_DIR="$fixtures" \
+    "$script" waiting-command -- true 2>&1
+)"
+[[ "$wait_output" == *"RESOURCE WAIT: intensive command 'waiting-command' is already running"* ]]
+wait "$holder_pid"
+holder_pid=''
+
 printf '%s\n' 'intensive_command_lock_test: passed'

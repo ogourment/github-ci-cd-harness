@@ -20,7 +20,9 @@ scripts/intensive_command_lock.sh ecojeux-atdd -- mix test.atdd
 ```
 
 Choose a lock name that represents the shared test database and browser server,
-not merely the shell process. Run the fixture-based tests with
+not merely the shell process. The default is to refuse a concurrent command;
+set `RESOURCE_INTENSIVE_LOCK_WAIT=1` to wait for the current holder and then run
+automatically. Run the fixture-based tests with
 `tests/resource_preflight_test.sh` and `tests/intensive_command_lock_test.sh`.
 
 The `phoenix_blue_green` and `web` Ansible roles can share persistent uploads

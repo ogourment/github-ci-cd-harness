@@ -8,6 +8,12 @@ fi
 
 lock_name="$1"
 shift 2
+wait_for_lock="${RESOURCE_INTENSIVE_LOCK_WAIT:-0}"
+
+if [[ "$wait_for_lock" != "0" && "$wait_for_lock" != "1" ]]; then
+  printf '%s\n' 'RESOURCE_INTENSIVE_LOCK_WAIT must be 0 or 1.' >&2
+  exit 64
+fi
 
 if [[ "${RESOURCE_INTENSIVE_LOCK:-on}" == "off" ]]; then
   exec "$@"
@@ -26,10 +32,22 @@ report_busy() {
   exit 2
 }
 
+report_wait() {
+  local holder="$1"
+  printf "RESOURCE WAIT: intensive command '%s' is already running; waiting for its lock.\n" "$lock_name" >&2
+  [[ -z "$holder" ]] || printf 'Current holder: %s\n' "$holder" >&2
+}
+
 if [[ "${RESOURCE_LOCK_BACKEND:-auto}" != "mkdir" ]] && command -v flock >/dev/null 2>&1; then
   exec 9>>"$lock_path"
   if ! flock -n 9; then
-    report_busy "$(cat "$lock_path" 2>/dev/null || true)"
+    holder="$(cat "$lock_path" 2>/dev/null || true)"
+    if [[ "$wait_for_lock" == "1" ]]; then
+      report_wait "$holder"
+      flock 9
+    else
+      report_busy "$holder"
+    fi
   fi
 
   : >"$lock_path"
@@ -46,16 +64,23 @@ acquire_mkdir_lock() {
   mkdir "$mkdir_lock_path" 2>/dev/null
 }
 
-if ! acquire_mkdir_lock; then
+wait_announced=false
+while ! acquire_mkdir_lock; do
   holder="$(cat "$mkdir_lock_path/holder" 2>/dev/null || true)"
   holder_pid="$(printf '%s' "$holder" | sed -n 's/^pid=\([0-9][0-9]*\).*/\1/p')"
   if [[ -n "$holder_pid" ]] && ! kill -0 "$holder_pid" 2>/dev/null; then
     rm -rf "$mkdir_lock_path"
-    acquire_mkdir_lock || report_busy "$holder"
+    continue
+  elif [[ "$wait_for_lock" == "1" ]]; then
+    if [[ "$wait_announced" == false ]]; then
+      report_wait "$holder"
+      wait_announced=true
+    fi
+    sleep 2
   else
     report_busy "$holder"
   fi
-fi
+done
 
 printf 'pid=%s command=' "$$" >"$mkdir_lock_path/holder"
 printf '%q ' "$@" >>"$mkdir_lock_path/holder"
