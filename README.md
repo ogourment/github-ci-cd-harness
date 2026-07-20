@@ -4,14 +4,24 @@ Reusable GitLab CI/CD templates and recipes for Phoenix/Elixir delivery pipeline
 
 ## Local resource preflight
 
-`scripts/resource_preflight.sh` is a lightweight Linux guard for local compile,
-browser, and concurrent test commands. It reads `MemAvailable` and swap use,
-warns when headroom is low, and exits with status 2 before critical memory
-pressure can push a workstation into swap thrashing. Consuming repositories can
-invoke it before intensive commands and set `RESOURCE_PREFLIGHT=off` for an
+`scripts/resource_preflight.sh` is a lightweight Linux guard for local compile
+and browser test commands. It combines `MemAvailable`, Linux memory PSI, and a
+short swap-I/O sample. High historical swap occupancy does not warn on its own
+when RAM and current pressure are healthy. Set `RESOURCE_PREFLIGHT_VERBOSE=1`
+to report that healthy historical occupancy, or `RESOURCE_PREFLIGHT=off` for an
 explicit one-off bypass.
 
-Run its fixture-based test with `tests/resource_preflight_test.sh`.
+`scripts/intensive_command_lock.sh` prevents two local commands from using the
+same intensive resource concurrently. It uses `flock` on Linux and an atomic
+directory lock fallback on macOS. A consuming ATDD command can use:
+
+```sh
+scripts/intensive_command_lock.sh ecojeux-atdd -- mix test.atdd
+```
+
+Choose a lock name that represents the shared test database and browser server,
+not merely the shell process. Run the fixture-based tests with
+`tests/resource_preflight_test.sh` and `tests/intensive_command_lock_test.sh`.
 
 The `phoenix_blue_green` and `web` Ansible roles can share persistent uploads
 across release colors. Set `phoenix_uploads_dir` with
