@@ -23,7 +23,16 @@ Choose a lock name that represents the shared test database and browser server,
 not merely the shell process. The default is to refuse a concurrent command;
 set `RESOURCE_INTENSIVE_LOCK_WAIT=1` to wait for the current holder and then run
 automatically. Run the fixture-based tests with
-`tests/resource_preflight_test.sh` and `tests/intensive_command_lock_test.sh`.
+`tests/resource_preflight_test.sh`, `tests/intensive_command_lock_test.sh`, and
+`tests/phoenix_test_database_preflight_test.sh`.
+
+`scripts/phoenix_test_database_preflight.sh` protects Phoenix projects that use
+linked Git worktrees. It requires a stable `MIX_TEST_PARTITION`, then runs
+`MIX_ENV=test mix ecto.create --quiet` before expensive checks. A missing
+database fails immediately with a configurable administrator command instead
+of surfacing after compilation. Consumers may set
+`PHOENIX_TEST_DATABASE_NAME` and `PHOENIX_TEST_DATABASE_OWNER` so the message
+names their exact partition database.
 
 The `phoenix_blue_green` and `web` Ansible roles can share persistent uploads
 across release colors. Set `phoenix_uploads_dir` with
