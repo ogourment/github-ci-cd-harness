@@ -1,3 +1,8 @@
+variables:
+  # Publishing a report to GitLab Pages creates a Pages deployment. Keep that
+  # separate from acceptance verification, so consumers opt in deliberately.
+  CI_CD_ENABLE_ACCEPTANCE_REPORT_PAGES: "false"
+
 acceptance_evidence:
   stage: verify
   needs:
@@ -259,7 +264,7 @@ acceptance_gate:
       fi
       exit 0
 
-acceptance_pages:
+publish_acceptance_report:
   stage: verify
   image: alpine:3.20
   pages:
@@ -268,7 +273,7 @@ acceptance_pages:
     - job: acceptance_evidence
       artifacts: true
   rules:
-    - if: '$CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH && $CI_CD_ENABLE_ACCEPTANCE_REPORT_PAGES == "true"'
   script:
     - ': "${ACCEPTANCE_PUBLIC_DIR:=public}"'
     - test -f "$ACCEPTANCE_PUBLIC_DIR/index.html"

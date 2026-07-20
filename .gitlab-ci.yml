@@ -23,9 +23,10 @@ template_smoke:
     - test -f templates/acceptance.yml
     - awk '/^\.ci_cd_deploy_notify:/ {inside=1; next} /^\.ci_cd_fetch_harness:/ {exit} inside && /set \+e/ {non_blocking=1} inside && /exit 0/ {zero_exit=1} END {exit !(non_blocking && zero_exit)}' templates/cd.yml
     - >-
-      awk '/^acceptance_pages:/ {inside=1; next} inside && /^  pages:/ {pages=1}
+      awk '/^publish_acceptance_report:/ {inside=1; next}
+      inside && /CI_CD_ENABLE_ACCEPTANCE_REPORT_PAGES == "true"/ {opt_in=1}
       inside && /^    publish: public/ {publish=1} inside && /^[^ ]/ {exit}
-      END {exit !(pages && publish)}' templates/acceptance.yml
+      END {exit !(opt_in && publish)}' templates/acceptance.yml
     - sh -n scripts/staging_release_smoke.sh
     - sh -n scripts/verify_health_identity.sh
     - bash -n scripts/resource_preflight.sh tests/resource_preflight_test.sh
@@ -45,12 +46,11 @@ acceptance_evidence:
   rules:
     - if: '$CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH'
   script:
-    - mkdir -p tmp/atdd public
+    - mkdir -p tmp/atdd
     - printf '%s\n' 'acceptance summary' > tmp/atdd/acceptance_summary.txt
     - printf '%s\n' 'ATDD_TEST_EXIT_CODE=0' 'ACCEPTANCE_SITE_EXIT_CODE=0' 'ATDD_GATE_EXIT_CODE=0' > tmp/atdd/status.env
-    - touch public/index.html
   artifacts:
-    paths: [tmp/atdd/, public]
+    paths: [tmp/atdd/]
     reports:
       dotenv: tmp/atdd/status.env
 
