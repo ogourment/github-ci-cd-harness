@@ -267,6 +267,8 @@ acceptance_pages:
   needs:
     - job: acceptance_evidence
       artifacts: true
+  rules:
+    - if: '$CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH'
   script:
     - ': "${ACCEPTANCE_PUBLIC_DIR:=public}"'
     - test -f "$ACCEPTANCE_PUBLIC_DIR/index.html"
