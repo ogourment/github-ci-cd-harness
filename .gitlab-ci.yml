@@ -75,3 +75,13 @@ notification_proof:
       artifacts: true
   script:
     - test "$(cat notification.txt)" = 'acceptance summary'
+
+# This repository releases exactly when its canonical VERSION changes. Keep the
+# shared template manual for consumers that use a different release process.
+release_tag:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_RELEASE_TAG == "true"'
+      changes:
+        - VERSION
+      when: on_success
+    - when: never
