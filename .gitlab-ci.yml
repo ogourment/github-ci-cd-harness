@@ -42,6 +42,10 @@ acceptance_evidence:
   stage: verify
   image: alpine:3.20
   needs: []
+  rules:
+    - if: '$CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH'
+  pages:
+    publish: public
   script:
     - mkdir -p tmp/atdd public
     - printf '%s\n' 'acceptance summary' > tmp/atdd/acceptance_summary.txt
@@ -64,22 +68,6 @@ acceptance_gate:
     - test -s tmp/atdd/acceptance_summary.txt
   artifacts:
     paths: [notification.txt]
-
-diag_pages:
-  stage: verify
-  image: alpine:3.20
-  needs:
-    - job: acceptance_evidence
-      artifacts: true
-  rules:
-    - if: '$CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH'
-  script:
-    - test -f public/index.html
-  pages:
-    publish: public
-  artifacts:
-    paths:
-      - public
 
 notification_proof:
   stage: production
