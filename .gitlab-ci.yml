@@ -69,6 +69,17 @@ acceptance_gate:
   artifacts:
     paths: [notification.txt]
 
+create-pages-2:
+  stage: verify
+  image: alpine:3.20
+  script:
+    - mkdir -p public
+    - echo bootstrap2 > public/index.html
+  pages:
+    publish: public
+  rules:
+    - if: '$CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH'
+
 notification_proof:
   stage: production
   image: alpine:3.20
