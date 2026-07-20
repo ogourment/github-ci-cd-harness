@@ -52,7 +52,7 @@ acceptance_evidence:
     - printf '%s\n' 'ATDD_TEST_EXIT_CODE=0' 'ACCEPTANCE_SITE_EXIT_CODE=0' 'ATDD_GATE_EXIT_CODE=0' > tmp/atdd/status.env
     - touch public/index.html
   artifacts:
-    paths: [tmp/atdd/, public/]
+    paths: [tmp/atdd/, public]
     reports:
       dotenv: tmp/atdd/status.env
 
