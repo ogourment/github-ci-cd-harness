@@ -42,17 +42,43 @@ NOTIFY_SCRIPT="{{ telegram_notify_script }}"
 REMOTE_ENV_PREFIX="{{ remote_env_prefix | default(otp_app_name | upper) }}"
 DEPLOY_STARTED_EPOCH="$(date -u +%s)"
 
+GIT_SHA_ENV_VAR="${REMOTE_ENV_PREFIX}_GIT_SHA"
+GIT_REF_ENV_VAR="${REMOTE_ENV_PREFIX}_GIT_REF"
+GIT_SUBJECT_ENV_VAR="${REMOTE_ENV_PREFIX}_GIT_SUBJECT"
+GIT_MESSAGES_ENV_VAR="${REMOTE_ENV_PREFIX}_GIT_MESSAGES"
+PIPELINE_URL_ENV_VAR="${REMOTE_ENV_PREFIX}_CI_PIPELINE_URL"
+DEPLOYED_AT_ENV_VAR="${REMOTE_ENV_PREFIX}_DEPLOYED_AT"
+
 metadata_value() {
   local name="${REMOTE_ENV_PREFIX}_$1"
   local value="${!name:-}"
   [[ -n "${value}" ]] && printf '%s' "${value}" || printf '%s' "${2:-}"
 }
 
+# The slot file is both a systemd EnvironmentFile and sourced by deployment
+# hooks. Bash's %q format keeps metadata data-only for both consumers, even
+# when a commit subject contains shell metacharacters.
+append_runtime_env() {
+  local name="$1"
+  local value="$2"
+  local file="$3"
+
+  printf '%s=' "${name}" >> "${file}"
+  printf '%q' "${value}" >> "${file}"
+  printf '\n' >> "${file}"
+}
+
 APP_DISPLAY_NAME="$(metadata_value APP_NAME "{{ app_name }}")"
 APP_VERSION="$(metadata_value APP_VERSION unknown)"
+GIT_SHA="$(metadata_value GIT_SHA "")"
+GIT_REF="$(metadata_value GIT_REF "")"
+GIT_SUBJECT="$(metadata_value GIT_SUBJECT "")"
+GIT_MESSAGES="$(metadata_value GIT_MESSAGES "")"
 ACTOR="$(metadata_value DEPLOY_ACTOR "${USER:-unknown}")"
 CI_PIPELINE_ID="$(metadata_value CI_PIPELINE_ID "${CI_PIPELINE_ID:-unknown}")"
+CI_PIPELINE_URL="$(metadata_value CI_PIPELINE_URL "")"
 HOST_DEPLOY_NOTIFY="$(metadata_value HOST_DEPLOY_NOTIFY true)"
+DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 if [[ "${CI_PIPELINE_ID}" == "unknown" || -z "${CI_PIPELINE_ID}" ]]; then
   release_pipeline_id="${RELEASE_ID##*-}"
@@ -143,9 +169,15 @@ ln -sfn "${RELEASE_DIR}" "${TARGET_LINK}"
 # metadata before starting the target so /health can attest the cutover.
 TARGET_ENV_FILE="${ENV_FILE_BASE}_${TARGET_COLOR}"
 tmp_env="$(mktemp)"
-grep -Ev "^(${RELEASE_ID_ENV_VAR}|${PIPELINE_ID_ENV_VAR})=" "${TARGET_ENV_FILE}" > "${tmp_env}" || true
-printf '%s="%s"\n' "${RELEASE_ID_ENV_VAR}" "${RELEASE_ID}" >> "${tmp_env}"
-printf '%s="%s"\n' "${PIPELINE_ID_ENV_VAR}" "${CI_PIPELINE_ID}" >> "${tmp_env}"
+grep -Ev "^(${RELEASE_ID_ENV_VAR}|${PIPELINE_ID_ENV_VAR}|${GIT_SHA_ENV_VAR}|${GIT_REF_ENV_VAR}|${GIT_SUBJECT_ENV_VAR}|${GIT_MESSAGES_ENV_VAR}|${PIPELINE_URL_ENV_VAR}|${DEPLOYED_AT_ENV_VAR})=" "${TARGET_ENV_FILE}" > "${tmp_env}" || true
+append_runtime_env "${RELEASE_ID_ENV_VAR}" "${RELEASE_ID}" "${tmp_env}"
+append_runtime_env "${PIPELINE_ID_ENV_VAR}" "${CI_PIPELINE_ID}" "${tmp_env}"
+append_runtime_env "${GIT_SHA_ENV_VAR}" "${GIT_SHA}" "${tmp_env}"
+append_runtime_env "${GIT_REF_ENV_VAR}" "${GIT_REF}" "${tmp_env}"
+append_runtime_env "${GIT_SUBJECT_ENV_VAR}" "${GIT_SUBJECT}" "${tmp_env}"
+append_runtime_env "${GIT_MESSAGES_ENV_VAR}" "${GIT_MESSAGES}" "${tmp_env}"
+append_runtime_env "${PIPELINE_URL_ENV_VAR}" "${CI_PIPELINE_URL}" "${tmp_env}"
+append_runtime_env "${DEPLOYED_AT_ENV_VAR}" "${DEPLOYED_AT}" "${tmp_env}"
 chown "{{ deploy_user }}:{{ deploy_user }}" "${tmp_env}"
 chmod 600 "${tmp_env}"
 mv "${tmp_env}" "${TARGET_ENV_FILE}"
@@ -212,8 +244,13 @@ chown "${DEPLOY_USER}:${DEPLOY_USER}" "${CURRENT_COLOR_FILE}"
 
 {% if phoenix_deploy_record %}
 echo "==> Recording deployment timeline entry..."
+CI_DEPLOY_COMMIT_MESSAGES_B64="$(printf '%s' "${GIT_MESSAGES}" | base64 -w 0)"
 sudo -u "${DEPLOY_USER}" env \
-  CI_COMMIT_SHA="${CI_COMMIT_SHA:-}" CI_COMMIT_TITLE="${CI_COMMIT_TITLE:-}" CI_PIPELINE_URL="${CI_PIPELINE_URL:-}" \
+  CI_COMMIT_SHA="${GIT_SHA}" \
+  CI_COMMIT_TITLE="${GIT_SUBJECT}" \
+  CI_DEPLOY_COMMIT_MESSAGES="${GIT_MESSAGES}" \
+  CI_DEPLOY_COMMIT_MESSAGES_B64="${CI_DEPLOY_COMMIT_MESSAGES_B64}" \
+  CI_PIPELINE_URL="${CI_PIPELINE_URL}" \
   bash -lc "
   set -euo pipefail
   set -a; [[ -f '${ENV_FILE_BASE}_${TARGET_COLOR}' ]] && source '${ENV_FILE_BASE}_${TARGET_COLOR}'; set +a

@@ -84,6 +84,7 @@ AGILE_U_GIT_SUBJECT
 AGILE_U_GIT_MESSAGES
 AGILE_U_DEPLOY_ACTOR
 AGILE_U_CI_PIPELINE_ID
+AGILE_U_CI_PIPELINE_URL
 AGILE_U_CI_JOB_ID
 AGILE_U_CI_JOB_WAIT_SECONDS
 AGILE_U_CI_PIPELINE_CREATED_AT_EPOCH
@@ -93,6 +94,13 @@ Remote helpers that send deployment alerts should read those variables instead
 of inferring release details from the server user or filesystem state. Set
 `CI_CD_REMOTE_ENV_PREFIX` only when an existing helper expects a different
 prefix.
+
+The managed blue/green helper copies the commit identity, commit messages,
+pipeline URL, and deployment timestamp into the target slot's runtime
+environment before starting it. When deployment recording is enabled, the same
+values are exposed to `record_deployment/4` as `CI_COMMIT_SHA`,
+`CI_COMMIT_TITLE`, `CI_DEPLOY_COMMIT_MESSAGES`,
+`CI_DEPLOY_COMMIT_MESSAGES_B64`, and `CI_PIPELINE_URL`.
 
 Deployment notification wrappers should honor `TELEGRAM_SILENT`. The standard
 policy is to send successful deployment messages with `TELEGRAM_SILENT=true`

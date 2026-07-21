@@ -29,9 +29,10 @@ template_smoke:
       END {exit !(opt_in && publish)}' templates/acceptance.yml
     - sh -n scripts/staging_release_smoke.sh
     - sh -n scripts/verify_health_identity.sh
-    - bash -n scripts/resource_preflight.sh scripts/intensive_command_lock.sh tests/resource_preflight_test.sh tests/intensive_command_lock_test.sh
+    - bash -n scripts/resource_preflight.sh scripts/intensive_command_lock.sh tests/resource_preflight_test.sh tests/intensive_command_lock_test.sh tests/deployment_metadata_contract_test.sh
     - tests/resource_preflight_test.sh
     - tests/intensive_command_lock_test.sh
+    - tests/deployment_metadata_contract_test.sh
     - printf '%s\n' '{"version":"1.2.3","release_id":"v1.2.3-abcdef12-99","pipeline_id":"99"}' > /tmp/health.json
     - scripts/verify_health_identity.sh /tmp/health.json 1.2.3 v1.2.3-abcdef12-99 99
     - '! scripts/verify_health_identity.sh /tmp/health.json 1.2.3 v1.2.3-abcdef12-99 100 2>/tmp/identity-error'
