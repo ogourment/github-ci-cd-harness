@@ -20,6 +20,8 @@ variables:
 
 .ci_cd_deploy_notify: &ci_cd_deploy_notify
   - |
+    ci_cd_deploy_commit_limit=10
+
     # A deployment has already succeeded or failed by the time this hook runs.
     # Reporting must never turn a successful release into a failed pipeline.
     set +e
@@ -52,7 +54,7 @@ variables:
     fi
 
     if [ -z "${ci_deploy_commit_messages:-}" ]; then
-      ci_deploy_commit_messages="$(git log --no-merges --pretty=format:'%h %s' --max-count=5 -- "${CI_COMMIT_SHA:-HEAD}" 2>/dev/null || true)"
+      ci_deploy_commit_messages="$(git log --no-merges --pretty=format:'%h %s' --max-count="${ci_cd_deploy_commit_limit}" -- "${CI_COMMIT_SHA:-HEAD}" 2>/dev/null || true)"
     fi
 
     commit_count="$(printf '%s\n' "${ci_deploy_commit_messages}" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
@@ -141,7 +143,7 @@ variables:
       printed=0
       while IFS= read -r commit_line; do
         [ -z "${commit_line}" ] && continue
-        if [ "$printed" -ge 5 ]; then
+        if [ "$printed" -ge "${ci_cd_deploy_commit_limit}" ]; then
           continue
         fi
         commit_hash="${commit_line%% *}"
@@ -153,8 +155,8 @@ variables:
         fi
         printed=$((printed + 1))
       done <<< "${ci_deploy_commit_messages}"
-      if [ "${commit_count}" -gt 5 ]; then
-        message+=$'\n'"... $((commit_count - 5)) more"
+      if [ "${commit_count}" -gt "${ci_cd_deploy_commit_limit}" ]; then
+        message+=$'\n'"... $((commit_count - ci_cd_deploy_commit_limit)) more"
       fi
     fi
 

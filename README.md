@@ -50,12 +50,12 @@ broader successor to `olivierg/acceptance-gitlab-ci`.
 Include this repository in consuming pipelines:
 
 ```yaml
-include:
+  include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.9
+    ref: v0.6.14
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.9
+    ref: v0.6.14
     file: /templates/cd.yml
 ```
 
