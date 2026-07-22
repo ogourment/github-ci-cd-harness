@@ -30,12 +30,14 @@ template_smoke:
     - grep -Fq 'acceptance_report_url="${CI_JOB_URL}/artifacts/file/${ACCEPTANCE_PUBLIC_DIR%/}/index.html"' templates/acceptance.yml
     - sh -n scripts/staging_release_smoke.sh
     - sh -n scripts/verify_health_identity.sh
-    - bash -n scripts/resource_preflight.sh scripts/intensive_command_lock.sh scripts/atdd_remote_copy.sh scripts/atdd_generate_thumbnails.sh tests/resource_preflight_test.sh tests/intensive_command_lock_test.sh tests/deployment_metadata_contract_test.sh tests/atdd_remote_copy_test.sh tests/atdd_generate_thumbnails_test.sh
+    - bash -n scripts/resource_preflight.sh scripts/intensive_command_lock.sh scripts/atdd_remote_copy.sh scripts/atdd_generate_thumbnails.sh \
+      tests/resource_preflight_test.sh tests/intensive_command_lock_test.sh tests/deployment_metadata_contract_test.sh tests/atdd_remote_copy_test.sh tests/atdd_generate_thumbnails_test.sh tests/telegram_sender_contract_test.sh
     - tests/resource_preflight_test.sh
     - tests/intensive_command_lock_test.sh
     - tests/deployment_metadata_contract_test.sh
     - tests/atdd_remote_copy_test.sh
     - tests/atdd_generate_thumbnails_test.sh
+    - tests/telegram_sender_contract_test.sh
     - printf '%s\n' '{"version":"1.2.3","release_id":"v1.2.3-abcdef12-99","pipeline_id":"99"}' > /tmp/health.json
     - scripts/verify_health_identity.sh /tmp/health.json 1.2.3 v1.2.3-abcdef12-99 99
     - '! scripts/verify_health_identity.sh /tmp/health.json 1.2.3 v1.2.3-abcdef12-99 100 2>/tmp/identity-error'

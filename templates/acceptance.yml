@@ -246,7 +246,8 @@ acceptance_gate:
           --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
           --data-urlencode "text@${acceptance_message_path}" \
           --data-urlencode "parse_mode=HTML" \
-          --data-urlencode "disable_notification=${acceptance_notify_silent}"
+          --data-urlencode "disable_notification=${acceptance_notify_silent}" \
+          --data-urlencode 'link_preview_options={"is_disabled":true}'
       else
         cat "$acceptance_message_path"
       fi
