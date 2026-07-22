@@ -59,4 +59,4 @@ ssh_opts=(
   -o StrictHostKeyChecking=accept-new
 )
 
-scp "${copy_opts[@]}" "${ssh_opts[@]}" "${source_path}" "${user}@${host}:${destination_path}"
+scp -C "${copy_opts[@]}" "${ssh_opts[@]}" "${source_path}" "${user}@${host}:${destination_path}"

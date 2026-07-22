@@ -86,7 +86,8 @@ The importer should then read
 `screenshots/` directory remains available to the live application after the CI
 runner exits. Use an application-owned persistent parent directory rather than
 temporary storage. File-source invocations keep their original non-recursive
-behavior.
+behavior. SSH compression is enabled because evidence JSON can be much larger
+than its compressed screenshots.
 
 `templates/cd.yml` defines:
 

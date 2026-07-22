@@ -32,10 +32,11 @@ PATH="${bin_dir}:${PATH}" scripts/atdd_remote_copy.sh \
 
 mapfile -t file_args < "${scp_args_log}"
 [[ "${file_args[*]}" != *" -r "* ]]
-[[ "${file_args[0]}" == "-i" ]]
-[[ "${file_args[1]}" == "${key_file}" ]]
-[[ "${file_args[8]}" == "${source_file}" ]]
-[[ "${file_args[9]}" == "release@staging.example.test:/tmp/remote evidence.json" ]]
+[[ "${file_args[0]}" == "-C" ]]
+[[ "${file_args[1]}" == "-i" ]]
+[[ "${file_args[2]}" == "${key_file}" ]]
+[[ "${file_args[9]}" == "${source_file}" ]]
+[[ "${file_args[10]}" == "release@staging.example.test:/tmp/remote evidence.json" ]]
 
 source_dir="${test_root}/acceptance evidence"
 mkdir -p "${source_dir}/screenshots"
@@ -45,10 +46,11 @@ PATH="${bin_dir}:${PATH}" scripts/atdd_remote_copy.sh \
   "${source_dir}" "/tmp/remote evidence"
 
 mapfile -t directory_args < "${scp_args_log}"
-[[ "${directory_args[0]}" == "-r" ]]
-[[ "${directory_args[1]}" == "-i" ]]
-[[ "${directory_args[9]}" == "${source_dir}" ]]
-[[ "${directory_args[10]}" == "release@staging.example.test:/tmp/remote evidence" ]]
+[[ "${directory_args[0]}" == "-C" ]]
+[[ "${directory_args[1]}" == "-r" ]]
+[[ "${directory_args[2]}" == "-i" ]]
+[[ "${directory_args[10]}" == "${source_dir}" ]]
+[[ "${directory_args[11]}" == "release@staging.example.test:/tmp/remote evidence" ]]
 
 missing_source="${test_root}/missing"
 if PATH="${bin_dir}:${PATH}" scripts/atdd_remote_copy.sh \
