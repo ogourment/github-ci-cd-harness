@@ -5,9 +5,14 @@ source_path="${1:?Source path required}"
 destination_path="${2:?Destination path required}"
 inventory="${ATDD_REMOTE_INVENTORY:-${ACCEPTANCE_REMOTE_INVENTORY:-tmp/atdd_staging.inventory}}"
 
-if [[ ! -f "${source_path}" ]]; then
+if [[ ! -f "${source_path}" && ! -d "${source_path}" ]]; then
   echo "ATDD remote copy source does not exist: ${source_path}" >&2
   exit 1
+fi
+
+copy_opts=()
+if [[ -d "${source_path}" ]]; then
+  copy_opts=(-r)
 fi
 
 if [[ ! -f "${inventory}" ]]; then
@@ -54,4 +59,4 @@ ssh_opts=(
   -o StrictHostKeyChecking=accept-new
 )
 
-scp "${ssh_opts[@]}" "${source_path}" "${user}@${host}:${destination_path}"
+scp "${copy_opts[@]}" "${ssh_opts[@]}" "${source_path}" "${user}@${host}:${destination_path}"

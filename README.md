@@ -72,6 +72,22 @@ The package also provides `scripts/atdd_remote_eval.sh` for acceptance tests
 that need to run a release-scoped Elixir expression over SSH against a deployed
 Phoenix release.
 
+`scripts/atdd_remote_copy.sh SOURCE DESTINATION` copies either one file or a
+directory tree over the same inventory-backed SSH connection. Copy the complete
+evidence directory when a live importer must serve screenshots locally:
+
+```sh
+scripts/atdd_remote_copy.sh "$ACCEPTANCE_EVIDENCE_DIR" \
+  "/opt/my_app/acceptance_evidence_${CI_PIPELINE_ID}"
+```
+
+The importer should then read
+`/opt/my_app/acceptance_evidence_${CI_PIPELINE_ID}/evidence.json`; its sibling
+`screenshots/` directory remains available to the live application after the CI
+runner exits. Use an application-owned persistent parent directory rather than
+temporary storage. File-source invocations keep their original non-recursive
+behavior.
+
 `templates/cd.yml` defines:
 
 - `build_release`
