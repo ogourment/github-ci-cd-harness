@@ -239,6 +239,10 @@ and release artifact/cache hygiene for deploy jobs, see
 ## Notes
 
 - Evidence artifacts and site output are published even when acceptance fails.
+- The evidence job exposes its generated site through that job's immutable
+  artifact URL. Live evidence importers should store this URL to keep historical
+  release links tied to the matching pipeline; `CI_PAGES_URL` always points at
+  the latest Pages deployment instead.
 - `acceptance_gate` is the explicit blocking gate.
 - The acceptance gate sends a notification after it has consumed the evidence.
   This avoids a no-op notification when an earlier staging deploy fails and is

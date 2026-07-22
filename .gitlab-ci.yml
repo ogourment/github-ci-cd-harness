@@ -27,6 +27,7 @@ template_smoke:
       inside && /CI_CD_ENABLE_ACCEPTANCE_REPORT_PAGES == "true"/ {opt_in=1}
       inside && /^    publish: public/ {publish=1} inside && /^[^ ]/ {exit}
       END {exit !(opt_in && publish)}' templates/acceptance.yml
+    - grep -Fq 'acceptance_report_url="${CI_JOB_URL}/artifacts/file/${ACCEPTANCE_PUBLIC_DIR%/}/index.html"' templates/acceptance.yml
     - sh -n scripts/staging_release_smoke.sh
     - sh -n scripts/verify_health_identity.sh
     - bash -n scripts/resource_preflight.sh scripts/intensive_command_lock.sh tests/resource_preflight_test.sh tests/intensive_command_lock_test.sh tests/deployment_metadata_contract_test.sh

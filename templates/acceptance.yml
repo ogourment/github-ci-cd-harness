@@ -113,17 +113,10 @@ acceptance_evidence:
         app_version=$(awk -F'"' '/^[[:space:]]*version:/ { print $2; exit }' mix.exs)
       fi
       app_version="${app_version:-unknown}"
-      public_path="${ACCEPTANCE_PUBLIC_DIR#public/}"
-      public_path="${public_path%/}"
-      if [ -n "${CI_PAGES_URL:-}" ]; then
-        if [ "$public_path" != "$ACCEPTANCE_PUBLIC_DIR" ] && [ -n "$public_path" ]; then
-          acceptance_report_url="${CI_PAGES_URL%/}/${public_path}/"
-        else
-          acceptance_report_url="${CI_PAGES_URL%/}/"
-        fi
-      else
-        acceptance_report_url="${CI_JOB_URL}/artifacts/file/${ACCEPTANCE_PUBLIC_DIR%/}/index.html"
-      fi
+      # The job artifact URL is immutable to this acceptance run. CI_PAGES_URL
+      # points at the latest Pages deployment, so storing it would make an old
+      # release card silently open a newer report.
+      acceptance_report_url="${CI_JOB_URL}/artifacts/file/${ACCEPTANCE_PUBLIC_DIR%/}/index.html"
       acceptance_report_base_url="${acceptance_report_url%/}"
       acceptance_report_base_url="${acceptance_report_base_url%/index.html}"
 
