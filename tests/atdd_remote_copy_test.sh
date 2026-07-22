@@ -65,12 +65,18 @@ grep -Fq "ATDD remote copy source does not exist: ${missing_source}" \
   "${test_root}/missing-error"
 
 printf '%s\n' '#!/usr/bin/env bash' 'printf '\''%s\n'\'' "$@" > "$RSYNC_ARGS_LOG"' > "${bin_dir}/rsync"
-printf '%s\n' '#!/usr/bin/env bash' 'printf '\''%s\n'\'' "$@" >> "$SSH_ARGS_LOG"' 'exit 0' > "${bin_dir}/ssh"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'printf '\''%s\n'\'' "$@" >> "$SSH_ARGS_LOG"' \
+  'if [[ "$*" == *"readlink --"* && "$*" != *"new_pipeline="* ]]; then printf '\''%s\n'\'' "${FAKE_CURRENT_TARGET:-}"; fi' \
+  'exit 0' \
+  > "${bin_dir}/ssh"
 chmod +x "${bin_dir}/rsync" "${bin_dir}/ssh"
 export RSYNC_ARGS_LOG="${rsync_args_log}"
 export SSH_ARGS_LOG="${ssh_args_log}"
 export ATDD_REMOTE_COPY_MODE="rsync-snapshots"
 export ATDD_REMOTE_COPY_CURRENT_LINK="/opt/example/acceptance_evidence_current"
+export FAKE_CURRENT_TARGET="/opt/example/acceptance_evidence_122_455"
 
 PATH="${bin_dir}:${PATH}" scripts/atdd_remote_copy.sh \
   "${source_dir}" "/opt/example/acceptance_evidence_123_456"
@@ -84,7 +90,7 @@ rsync_args_joined=" ${rsync_args[*]} "
 [[ "${rsync_args_joined}" == *" --delay-updates "* ]]
 [[ "${rsync_args_joined}" == *" --partial "* ]]
 [[ "${rsync_args_joined}" == *" --protect-args "* ]]
-[[ "${rsync_args_joined}" == *" --link-dest=/opt/example/acceptance_evidence_current "* ]]
+[[ "${rsync_args_joined}" == *" --link-dest=/opt/example/acceptance_evidence_122_455 "* ]]
 [[ "${rsync_args_joined}" == *" ${source_dir}/ "* ]]
 [[ "${rsync_args_joined}" == *" release@staging.example.test:/opt/example/acceptance_evidence_123_456/ "* ]]
 
@@ -102,5 +108,56 @@ fi
 
 grep -Fq "ATDD_REMOTE_COPY_CURRENT_LINK is required" \
   "${test_root}/missing-current-link-error"
+
+expect_invalid_snapshot_path() {
+  local destination="$1"
+  local link="$2"
+  local expected="$3"
+  local error_file="${test_root}/invalid-$RANDOM"
+  if PATH="${bin_dir}:${PATH}" ATDD_REMOTE_COPY_CURRENT_LINK="${link}" \
+    scripts/atdd_remote_copy.sh "${source_dir}" "${destination}" 2> "${error_file}"; then
+    echo "expected invalid snapshot paths to fail: ${destination} ${link}" >&2
+    exit 1
+  fi
+  grep -Fq "${expected}" "${error_file}"
+}
+
+expect_invalid_snapshot_path \
+  "relative/acceptance_evidence_1_2" "/opt/example/acceptance_evidence_current" \
+  "not a safe absolute path"
+expect_invalid_snapshot_path \
+  "/acceptance_evidence_1_2" "/acceptance_evidence_current" \
+  "parent must not be root"
+expect_invalid_snapshot_path \
+  "/opt/example/not-evidence" "/opt/example/acceptance_evidence_current" \
+  "must be named acceptance_evidence_<pipeline>_<job>"
+expect_invalid_snapshot_path \
+  "/opt/example/acceptance_evidence_1_2" "/opt/other/acceptance_evidence_current" \
+  "must be distinct siblings"
+expect_invalid_snapshot_path \
+  "/opt/example/acceptance_evidence_1_2" "/opt/example/not-current" \
+  "must be named acceptance_evidence_current"
+
+export FAKE_CURRENT_TARGET="/opt/other/acceptance_evidence_122_455"
+expect_invalid_snapshot_path \
+  "/opt/example/acceptance_evidence_123_456" "/opt/example/acceptance_evidence_current" \
+  "current symlink target is outside the snapshot parent"
+
+# Serialized older pipelines may still execute later, but cannot move the
+# shared current symlink backward.
+: > "${ssh_args_log}"
+export FAKE_CURRENT_TARGET="/opt/example/acceptance_evidence_200_10"
+PATH="${bin_dir}:${PATH}" scripts/atdd_remote_copy.sh \
+  "${source_dir}" "/opt/example/acceptance_evidence_199_999" \
+  2> "${test_root}/older-pipeline-error"
+grep -Fq "current link remains on newer pipeline 200, job 10" \
+  "${test_root}/older-pipeline-error"
+if grep -Fq 'mv -Tf' "${ssh_args_log}"; then
+  echo "expected an older pipeline not to update the current symlink" >&2
+  exit 1
+fi
+
+grep -Fq 'resource_group: "$CI_PROJECT_PATH_SLUG-acceptance-evidence"' \
+  templates/acceptance.yml
 
 echo "atdd_remote_copy_test: passed"

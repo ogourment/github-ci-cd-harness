@@ -72,6 +72,49 @@ if [[ "${copy_mode}" == "rsync-snapshots" ]]; then
     exit 1
   fi
 
+  snapshot_parent=""
+  snapshot_basename=""
+  validate_snapshot_path() {
+    local label="$1"
+    local path="$2"
+
+    if [[ "${path}" != /* || "${path}" == "/" || "${path}" == */ ||
+      "${path}" == *//* || "${path}" == */./* || "${path}" == */../* ||
+      ! "${path}" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+      echo "ATDD rsync snapshot ${label} is not a safe absolute path: ${path}" >&2
+      exit 1
+    fi
+
+    snapshot_parent="${path%/*}"
+    snapshot_basename="${path##*/}"
+    if [[ -z "${snapshot_parent}" || "${snapshot_parent}" == "/" ]]; then
+      echo "ATDD rsync snapshot ${label} parent must not be root: ${path}" >&2
+      exit 1
+    fi
+  }
+
+  validate_snapshot_path destination "${destination_path}"
+  destination_parent="${snapshot_parent}"
+  destination_basename="${snapshot_basename}"
+  if [[ ! "${destination_basename}" =~ ^acceptance_evidence_([0-9]{1,18})_([0-9]{1,18})$ ]]; then
+    echo "ATDD rsync snapshot destination must be named acceptance_evidence_<pipeline>_<job>: ${destination_path}" >&2
+    exit 1
+  fi
+  destination_pipeline_id="${BASH_REMATCH[1]}"
+  destination_job_id="${BASH_REMATCH[2]}"
+
+  validate_snapshot_path current-link "${current_link}"
+  current_parent="${snapshot_parent}"
+  current_basename="${snapshot_basename}"
+  if [[ "${current_basename}" != "acceptance_evidence_current" ]]; then
+    echo "ATDD rsync snapshot current link must be named acceptance_evidence_current: ${current_link}" >&2
+    exit 1
+  fi
+  if [[ "${destination_path}" == "${current_link}" || "${destination_parent}" != "${current_parent}" ]]; then
+    echo "ATDD rsync snapshot destination and current link must be distinct siblings" >&2
+    exit 1
+  fi
+
   if ! command -v rsync >/dev/null 2>&1; then
     echo "ATDD rsync snapshot mode requires rsync in the CI job" >&2
     exit 1
@@ -80,6 +123,35 @@ if [[ "${copy_mode}" == "rsync-snapshots" ]]; then
   if ! ssh "${ssh_opts[@]}" "${user}@${host}" 'command -v rsync >/dev/null 2>&1'; then
     echo "ATDD rsync snapshot mode requires rsync on ${host}" >&2
     exit 1
+  fi
+
+  remote_quote() {
+    local value="${1//\'/\'\\\'\'}"
+    printf "'%s'" "${value}"
+  }
+
+  quoted_link="$(remote_quote "${current_link}")"
+  current_target="$(ssh "${ssh_opts[@]}" "${user}@${host}" \
+    "set -eu; link=${quoted_link}; if [ -L \"\${link}\" ]; then readlink -- \"\${link}\"; elif [ -e \"\${link}\" ]; then echo 'ATDD snapshot current path exists but is not a symlink' >&2; exit 1; fi")"
+
+  advance_current=true
+  if [[ -n "${current_target}" ]]; then
+    validate_snapshot_path current-target "${current_target}"
+    current_target_parent="${snapshot_parent}"
+    current_target_basename="${snapshot_basename}"
+    if [[ "${current_target_parent}" != "${destination_parent}" ||
+      ! "${current_target_basename}" =~ ^acceptance_evidence_([0-9]{1,18})_([0-9]{1,18})$ ]]; then
+      echo "ATDD rsync snapshot current symlink target is outside the snapshot parent or malformed: ${current_target}" >&2
+      exit 1
+    fi
+
+    current_pipeline_id="${BASH_REMATCH[1]}"
+    current_job_id="${BASH_REMATCH[2]}"
+    if ((10#${destination_pipeline_id} < 10#${current_pipeline_id})) ||
+      { ((10#${destination_pipeline_id} == 10#${current_pipeline_id})) &&
+        ((10#${destination_job_id} < 10#${current_job_id})); }; then
+      advance_current=false
+    fi
   fi
 
   printf -v rsync_rsh '%q ' ssh "${ssh_opts[@]}"
@@ -96,8 +168,9 @@ if [[ "${copy_mode}" == "rsync-snapshots" ]]; then
   # A successful previous snapshot is a transfer basis and hard-link source.
   # Identical files therefore cross neither the network nor consume another
   # file's worth of remote storage. The first run remains a normal full copy.
-  if ssh "${ssh_opts[@]}" "${user}@${host}" test -d "${current_link}"; then
-    rsync_opts+=("--link-dest=${current_link}")
+  if [[ -n "${current_target}" ]] &&
+    ssh "${ssh_opts[@]}" "${user}@${host}" test -d "${current_target}"; then
+    rsync_opts+=("--link-dest=${current_target}")
   fi
 
   rsync "${rsync_opts[@]}" \
@@ -105,17 +178,18 @@ if [[ "${copy_mode}" == "rsync-snapshots" ]]; then
     "${source_path%/}/" \
     "${user}@${host}:${destination_path%/}/"
 
-  remote_quote() {
-    local value="${1//\'/\'\\\'\'}"
-    printf "'%s'" "${value}"
-  }
-
-  quoted_link="$(remote_quote "${current_link}")"
   quoted_destination="$(remote_quote "${destination_path}")"
+  quoted_parent="$(remote_quote "${destination_parent}")"
   # Only advance the basis after rsync completed. A retry can safely resume the
   # same destination, while a failed transfer leaves the last complete basis.
-  ssh "${ssh_opts[@]}" "${user}@${host}" \
-    "set -eu; link=${quoted_link}; destination=${quoted_destination}; temporary=\"\${link}.tmp.\$\$\"; rm -f \"\${temporary}\"; ln -s \"\${destination}\" \"\${temporary}\"; mv -Tf \"\${temporary}\" \"\${link}\""
+  # Re-check the IDs remotely so even a caller outside the resource group
+  # cannot win a race by moving the link backward after our initial read.
+  if [[ "${advance_current}" == "true" ]]; then
+    ssh "${ssh_opts[@]}" "${user}@${host}" \
+      "set -eu; link=${quoted_link}; destination=${quoted_destination}; parent=${quoted_parent}; new_pipeline=${destination_pipeline_id}; new_job=${destination_job_id}; if [ -L \"\${link}\" ]; then current=\$(readlink -- \"\${link}\"); [ \"\${current%/*}\" = \"\${parent}\" ] || { echo 'ATDD snapshot current symlink target escaped its parent' >&2; exit 1; }; current_basename=\${current##*/}; current_ids=\${current_basename#acceptance_evidence_}; current_pipeline=\${current_ids%%_*}; current_job=\${current_ids#*_}; case \"\${current_pipeline}:\${current_job}\" in *[!0-9:]*|:*|*:) echo 'ATDD snapshot current symlink target is malformed' >&2; exit 1;; esac; if [ \"\${current_pipeline}\" -gt \"\${new_pipeline}\" ] || { [ \"\${current_pipeline}\" -eq \"\${new_pipeline}\" ] && [ \"\${current_job}\" -gt \"\${new_job}\" ]; }; then echo \"ATDD rsync snapshot current link remains on newer pipeline \${current_pipeline}, job \${current_job}\" >&2; exit 0; fi; elif [ -e \"\${link}\" ]; then echo 'ATDD snapshot current path exists but is not a symlink' >&2; exit 1; fi; temporary=\"\${link}.tmp.\$\$\"; rm -f \"\${temporary}\"; ln -s \"\${destination}\" \"\${temporary}\"; mv -Tf \"\${temporary}\" \"\${link}\""
+  else
+    echo "ATDD rsync snapshot current link remains on newer pipeline ${current_pipeline_id}, job ${current_job_id}" >&2
+  fi
 elif [[ "${copy_mode}" == "scp" ]]; then
   scp -C "${copy_opts[@]}" "${ssh_opts[@]}" "${source_path}" "${user}@${host}:${destination_path}"
 else

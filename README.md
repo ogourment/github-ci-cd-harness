@@ -52,10 +52,10 @@ Include this repository in consuming pipelines:
 ```yaml
   include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.19
+    ref: v0.6.20
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.19
+    ref: v0.6.20
     file: /templates/cd.yml
 ```
 
@@ -103,10 +103,15 @@ scripts/atdd_remote_copy.sh "$ACCEPTANCE_EVIDENCE_DIR" \
 This mode requires `rsync` in both the CI image and on the remote host. It uses
 checksums because CI recreates file timestamps, compression in transit, and
 `--link-dest` against the last successfully copied snapshot. Identical files
-become hard links in the new immutable run directory; changed files use rsync's
+become hard links in the new run-specific directory; changed files use rsync's
 block delta transfer. The `acceptance_evidence_current` symlink advances only
 after a complete transfer, so failed jobs and retries retain a valid basis.
 The first run, or a run after the symlink is removed, transfers everything.
+The shared `acceptance_evidence` job uses a project-scoped GitLab
+`resource_group`, preventing concurrent pipelines from racing while updating
+the symlink. The copy helper additionally compares the pipeline and job IDs in
+the strictly validated snapshot names and refuses to move the link backward if
+GitLab schedules serialized pipelines out of order.
 
 `atdd_generate_thumbnails.sh` requires ImageMagick (`magick` or `convert`) in
 the CI image. It converts each top-level `screenshots/*.png` into

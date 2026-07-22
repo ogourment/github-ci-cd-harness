@@ -5,6 +5,9 @@ variables:
 
 acceptance_evidence:
   stage: verify
+  # Serializes run snapshot creation and current-link advancement across
+  # pipelines. The copy helper also rejects backward current-link movement.
+  resource_group: "$CI_PROJECT_PATH_SLUG-acceptance-evidence"
   needs:
     - job: deploy_staging
       artifacts: false
