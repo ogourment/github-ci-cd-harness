@@ -4,6 +4,8 @@ set -euo pipefail
 source_path="${1:?Source path required}"
 destination_path="${2:?Destination path required}"
 inventory="${ATDD_REMOTE_INVENTORY:-${ACCEPTANCE_REMOTE_INVENTORY:-tmp/atdd_staging.inventory}}"
+copy_mode="${ATDD_REMOTE_COPY_MODE:-scp}"
+current_link="${ATDD_REMOTE_COPY_CURRENT_LINK:-}"
 
 if [[ ! -f "${source_path}" && ! -d "${source_path}" ]]; then
   echo "ATDD remote copy source does not exist: ${source_path}" >&2
@@ -59,4 +61,64 @@ ssh_opts=(
   -o StrictHostKeyChecking=accept-new
 )
 
-scp -C "${copy_opts[@]}" "${ssh_opts[@]}" "${source_path}" "${user}@${host}:${destination_path}"
+if [[ "${copy_mode}" == "rsync-snapshots" ]]; then
+  if [[ ! -d "${source_path}" ]]; then
+    echo "ATDD rsync snapshot source must be a directory: ${source_path}" >&2
+    exit 1
+  fi
+
+  if [[ -z "${current_link}" ]]; then
+    echo "ATDD_REMOTE_COPY_CURRENT_LINK is required for rsync-snapshots mode" >&2
+    exit 1
+  fi
+
+  if ! command -v rsync >/dev/null 2>&1; then
+    echo "ATDD rsync snapshot mode requires rsync in the CI job" >&2
+    exit 1
+  fi
+
+  if ! ssh "${ssh_opts[@]}" "${user}@${host}" 'command -v rsync >/dev/null 2>&1'; then
+    echo "ATDD rsync snapshot mode requires rsync on ${host}" >&2
+    exit 1
+  fi
+
+  printf -v rsync_rsh '%q ' ssh "${ssh_opts[@]}"
+  rsync_opts=(
+    --archive
+    --checksum
+    --compress
+    --delete-delay
+    --delay-updates
+    --partial
+    --protect-args
+  )
+
+  # A successful previous snapshot is a transfer basis and hard-link source.
+  # Identical files therefore cross neither the network nor consume another
+  # file's worth of remote storage. The first run remains a normal full copy.
+  if ssh "${ssh_opts[@]}" "${user}@${host}" test -d "${current_link}"; then
+    rsync_opts+=("--link-dest=${current_link}")
+  fi
+
+  rsync "${rsync_opts[@]}" \
+    -e "${rsync_rsh% }" \
+    "${source_path%/}/" \
+    "${user}@${host}:${destination_path%/}/"
+
+  remote_quote() {
+    local value="${1//\'/\'\\\'\'}"
+    printf "'%s'" "${value}"
+  }
+
+  quoted_link="$(remote_quote "${current_link}")"
+  quoted_destination="$(remote_quote "${destination_path}")"
+  # Only advance the basis after rsync completed. A retry can safely resume the
+  # same destination, while a failed transfer leaves the last complete basis.
+  ssh "${ssh_opts[@]}" "${user}@${host}" \
+    "set -eu; link=${quoted_link}; destination=${quoted_destination}; temporary=\"\${link}.tmp.\$\$\"; rm -f \"\${temporary}\"; ln -s \"\${destination}\" \"\${temporary}\"; mv -Tf \"\${temporary}\" \"\${link}\""
+elif [[ "${copy_mode}" == "scp" ]]; then
+  scp -C "${copy_opts[@]}" "${ssh_opts[@]}" "${source_path}" "${user}@${host}:${destination_path}"
+else
+  echo "Unsupported ATDD remote copy mode: ${copy_mode}" >&2
+  exit 1
+fi

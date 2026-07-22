@@ -52,10 +52,10 @@ Include this repository in consuming pipelines:
 ```yaml
   include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.14
+    ref: v0.6.19
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.14
+    ref: v0.6.19
     file: /templates/cd.yml
 ```
 
@@ -88,6 +88,33 @@ runner exits. Use an application-owned persistent parent directory rather than
 temporary storage. File-source invocations keep their original non-recursive
 behavior. SSH compression is enabled because evidence JSON can be much larger
 than its compressed screenshots.
+
+For recurring evidence directories, opt into rsync snapshots so unchanged
+screenshots are neither retransmitted nor duplicated on the server:
+
+```sh
+scripts/atdd_generate_thumbnails.sh "$ACCEPTANCE_EVIDENCE_DIR"
+ATDD_REMOTE_COPY_MODE=rsync-snapshots \
+ATDD_REMOTE_COPY_CURRENT_LINK=/opt/my_app/acceptance_evidence_current \
+scripts/atdd_remote_copy.sh "$ACCEPTANCE_EVIDENCE_DIR" \
+  "/opt/my_app/acceptance_evidence_${CI_PIPELINE_ID}_${CI_JOB_ID}"
+```
+
+This mode requires `rsync` in both the CI image and on the remote host. It uses
+checksums because CI recreates file timestamps, compression in transit, and
+`--link-dest` against the last successfully copied snapshot. Identical files
+become hard links in the new immutable run directory; changed files use rsync's
+block delta transfer. The `acceptance_evidence_current` symlink advances only
+after a complete transfer, so failed jobs and retries retain a valid basis.
+The first run, or a run after the symlink is removed, transfers everything.
+
+`atdd_generate_thumbnails.sh` requires ImageMagick (`magick` or `convert`) in
+the CI image. It converts each top-level `screenshots/*.png` into
+`thumbnails/<name>.webp` at quality 70, strips metadata, and limits width to 480
+pixels without enlarging smaller images. Full-page height remains proportional.
+Outputs are replaced atomically, so a failed conversion cannot overwrite the
+last complete thumbnail. On Debian-based CI images, install the prerequisites
+with `apt-get install --no-install-recommends imagemagick rsync`.
 
 `templates/cd.yml` defines:
 
