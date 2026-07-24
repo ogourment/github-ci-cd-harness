@@ -6,6 +6,7 @@ destination_path="${2:?Destination path required}"
 inventory="${ATDD_REMOTE_INVENTORY:-${ACCEPTANCE_REMOTE_INVENTORY:-tmp/atdd_staging.inventory}}"
 copy_mode="${ATDD_REMOTE_COPY_MODE:-scp}"
 current_link="${ATDD_REMOTE_COPY_CURRENT_LINK:-}"
+stats_file="${ATDD_REMOTE_COPY_STATS_FILE:-}"
 
 if [[ ! -f "${source_path}" && ! -d "${source_path}" ]]; then
   echo "ATDD remote copy source does not exist: ${source_path}" >&2
@@ -157,12 +158,17 @@ if [[ "${copy_mode}" == "rsync-snapshots" ]]; then
   printf -v rsync_rsh '%q ' ssh "${ssh_opts[@]}"
   rsync_opts=(
     --archive
+    # Acceptance screenshots are regenerated with fresh mtimes even when
+    # their bytes are unchanged. Do not preserve those timestamps: rsync
+    # otherwise refuses to hard-link identical files from --link-dest.
+    --no-times
     --checksum
     --compress
     --delete-delay
     --delay-updates
     --partial
     --protect-args
+    --stats
   )
 
   # A successful previous snapshot is a transfer basis and hard-link source.
@@ -173,10 +179,28 @@ if [[ "${copy_mode}" == "rsync-snapshots" ]]; then
     rsync_opts+=("--link-dest=${current_target}")
   fi
 
-  rsync "${rsync_opts[@]}" \
-    -e "${rsync_rsh% }" \
-    "${source_path%/}/" \
-    "${user}@${host}:${destination_path%/}/"
+  if [[ -n "${stats_file}" ]]; then
+    mkdir -p -- "$(dirname -- "${stats_file}")"
+    stats_temporary="$(mktemp "${stats_file}.tmp.XXXXXX")"
+    cleanup_stats() {
+      rm -f -- "${stats_temporary}"
+    }
+    trap cleanup_stats EXIT
+
+    LC_ALL=C rsync "${rsync_opts[@]}" \
+      -e "${rsync_rsh% }" \
+      "${source_path%/}/" \
+      "${user}@${host}:${destination_path%/}/" \
+      > "${stats_temporary}"
+    cat -- "${stats_temporary}"
+    mv -f -- "${stats_temporary}" "${stats_file}"
+    trap - EXIT
+  else
+    LC_ALL=C rsync "${rsync_opts[@]}" \
+      -e "${rsync_rsh% }" \
+      "${source_path%/}/" \
+      "${user}@${host}:${destination_path%/}/"
+  fi
 
   quoted_destination="$(remote_quote "${destination_path}")"
   quoted_parent="$(remote_quote "${destination_parent}")"

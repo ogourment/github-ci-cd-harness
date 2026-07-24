@@ -4,11 +4,13 @@ set -euo pipefail
 test_root="$(mktemp -d)"
 trap 'rm -rf "${test_root}"' EXIT
 
+real_rsync="$(command -v rsync)"
 bin_dir="${test_root}/bin"
 inventory="${test_root}/inventory"
 key_file="${test_root}/deploy-key"
 scp_args_log="${test_root}/scp-args"
 rsync_args_log="${test_root}/rsync-args"
+rsync_stats_log="${test_root}/rsync-stats"
 ssh_args_log="${test_root}/ssh-args"
 mkdir -p "${bin_dir}"
 touch "${key_file}"
@@ -64,7 +66,11 @@ fi
 grep -Fq "ATDD remote copy source does not exist: ${missing_source}" \
   "${test_root}/missing-error"
 
-printf '%s\n' '#!/usr/bin/env bash' 'printf '\''%s\n'\'' "$@" > "$RSYNC_ARGS_LOG"' > "${bin_dir}/rsync"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'printf '\''%s\n'\'' "$@" > "$RSYNC_ARGS_LOG"' \
+  'printf '\''Number of files: 7\nTotal file size: 900 bytes\nLiteral data: 120 bytes\nMatched data: 780 bytes\n'\''' \
+  > "${bin_dir}/rsync"
 printf '%s\n' \
   '#!/usr/bin/env bash' \
   'printf '\''%s\n'\'' "$@" >> "$SSH_ARGS_LOG"' \
@@ -76,6 +82,7 @@ export RSYNC_ARGS_LOG="${rsync_args_log}"
 export SSH_ARGS_LOG="${ssh_args_log}"
 export ATDD_REMOTE_COPY_MODE="rsync-snapshots"
 export ATDD_REMOTE_COPY_CURRENT_LINK="/opt/example/acceptance_evidence_current"
+export ATDD_REMOTE_COPY_STATS_FILE="${rsync_stats_log}"
 export FAKE_CURRENT_TARGET="/opt/example/acceptance_evidence_122_455"
 
 PATH="${bin_dir}:${PATH}" scripts/atdd_remote_copy.sh \
@@ -84,12 +91,14 @@ PATH="${bin_dir}:${PATH}" scripts/atdd_remote_copy.sh \
 mapfile -t rsync_args < "${rsync_args_log}"
 rsync_args_joined=" ${rsync_args[*]} "
 [[ "${rsync_args_joined}" == *" --archive "* ]]
+[[ "${rsync_args_joined}" == *" --no-times "* ]]
 [[ "${rsync_args_joined}" == *" --checksum "* ]]
 [[ "${rsync_args_joined}" == *" --compress "* ]]
 [[ "${rsync_args_joined}" == *" --delete-delay "* ]]
 [[ "${rsync_args_joined}" == *" --delay-updates "* ]]
 [[ "${rsync_args_joined}" == *" --partial "* ]]
 [[ "${rsync_args_joined}" == *" --protect-args "* ]]
+[[ "${rsync_args_joined}" == *" --stats "* ]]
 [[ "${rsync_args_joined}" == *" --link-dest=/opt/example/acceptance_evidence_122_455 "* ]]
 [[ "${rsync_args_joined}" == *" ${source_dir}/ "* ]]
 [[ "${rsync_args_joined}" == *" release@staging.example.test:/opt/example/acceptance_evidence_123_456/ "* ]]
@@ -98,6 +107,12 @@ grep -Fq 'command -v rsync >/dev/null 2>&1' "${ssh_args_log}"
 grep -Fq 'test' "${ssh_args_log}"
 grep -Fq '/opt/example/acceptance_evidence_current' "${ssh_args_log}"
 grep -Fq '/opt/example/acceptance_evidence_123_456' "${ssh_args_log}"
+grep -Fq 'Literal data: 120 bytes' "${rsync_stats_log}"
+grep -Fq 'Matched data: 780 bytes' "${rsync_stats_log}"
+if find "${test_root}" -maxdepth 1 -name 'rsync-stats.tmp.*' | grep -q .; then
+  echo "expected the rsync metrics file to be written atomically" >&2
+  exit 1
+fi
 
 if PATH="${bin_dir}:${PATH}" ATDD_REMOTE_COPY_CURRENT_LINK= \
   scripts/atdd_remote_copy.sh "${source_dir}" "/opt/example/other" \
@@ -159,5 +174,22 @@ fi
 
 grep -Fq 'resource_group: "$CI_PROJECT_PATH_SLUG-acceptance-evidence"' \
   templates/acceptance.yml
+
+# Regenerated screenshots commonly keep identical bytes but receive new
+# mtimes. The snapshot options must still let rsync hard-link those files to
+# the previous snapshot.
+hardlink_source="${test_root}/hardlink-source"
+hardlink_basis="${test_root}/hardlink-basis"
+hardlink_destination="${test_root}/hardlink-destination"
+mkdir -p "${hardlink_source}" "${hardlink_basis}"
+printf 'unchanged screenshot\n' > "${hardlink_source}/step.png"
+printf 'unchanged screenshot\n' > "${hardlink_basis}/step.png"
+touch -d '2026-07-20 12:00:00 UTC' "${hardlink_basis}/step.png"
+touch -d '2026-07-21 12:00:00 UTC' "${hardlink_source}/step.png"
+"${real_rsync}" --archive --no-times --checksum \
+  "--link-dest=${hardlink_basis}" \
+  "${hardlink_source}/" "${hardlink_destination}/"
+[[ "$(stat -c '%i' "${hardlink_basis}/step.png")" == \
+  "$(stat -c '%i' "${hardlink_destination}/step.png")" ]]
 
 echo "atdd_remote_copy_test: passed"

@@ -15,6 +15,8 @@ grep -Fq 'link_preview_options={"is_disabled":true}' "$acceptance_template"
 printf '%s\n' 'asserting acceptance evidence payload still emits HTML links'
 grep -Fq 'Evidence report: <a href=' "$acceptance_template"
 grep -Fq 'Live evidence: <a href=' "$acceptance_template"
+grep -Fq "grep '^ACCEPTANCE_METRIC '" "$acceptance_template"
+grep -Fq 'live_evidence_metrics.log' "$acceptance_template"
 
 printf '%s\n' 'asserting deploy senders do not include link previews or link-rich message payloads'
 ! grep -Fq 'link_preview_options=' "$cd_template"

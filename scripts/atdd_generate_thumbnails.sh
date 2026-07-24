@@ -4,6 +4,8 @@ set -euo pipefail
 evidence_dir="${1:?Evidence directory required}"
 screenshots_dir="${evidence_dir%/}/screenshots"
 thumbnails_dir="${evidence_dir%/}/thumbnails"
+stats_file="${ATDD_THUMBNAIL_STATS_FILE:-}"
+started_at="${SECONDS}"
 
 if [[ ! -d "${screenshots_dir}" ]]; then
   echo "ATDD screenshot directory does not exist: ${screenshots_dir}" >&2
@@ -28,13 +30,20 @@ fi
 
 mkdir -p "${thumbnails_dir}"
 temporary=""
+stats_temporary=""
 cleanup() {
   if [[ -n "${temporary}" ]]; then
     rm -f -- "${temporary}"
   fi
+  if [[ -n "${stats_temporary}" ]]; then
+    rm -f -- "${stats_temporary}"
+  fi
 }
 trap cleanup EXIT
 
+thumbnail_count=0
+source_bytes=0
+thumbnail_bytes=0
 while IFS= read -r -d '' screenshot; do
   filename="${screenshot##*/}"
   thumbnail="${thumbnails_dir}/${filename%.png}.webp"
@@ -58,4 +67,27 @@ while IFS= read -r -d '' screenshot; do
 
   mv -f -- "${temporary}" "${thumbnail}"
   temporary=""
+  thumbnail_count=$((thumbnail_count + 1))
+  source_bytes=$((source_bytes + $(stat -c '%s' -- "${screenshot}")))
+  thumbnail_bytes=$((thumbnail_bytes + $(stat -c '%s' -- "${thumbnail}")))
 done < <(find "${screenshots_dir}" -maxdepth 1 -type f -name '*.png' -print0)
+
+saved_bytes=$((source_bytes - thumbnail_bytes))
+duration_seconds=$((SECONDS - started_at))
+
+if [[ -n "${stats_file}" ]]; then
+  mkdir -p -- "$(dirname -- "${stats_file}")"
+  stats_temporary="$(mktemp "${stats_file}.tmp.XXXXXX")"
+  {
+    printf 'ATDD_THUMBNAIL_COUNT=%s\n' "${thumbnail_count}"
+    printf 'ATDD_THUMBNAIL_SOURCE_BYTES=%s\n' "${source_bytes}"
+    printf 'ATDD_THUMBNAIL_BYTES=%s\n' "${thumbnail_bytes}"
+    printf 'ATDD_THUMBNAIL_SAVED_BYTES=%s\n' "${saved_bytes}"
+    printf 'ATDD_THUMBNAIL_DURATION_SECONDS=%s\n' "${duration_seconds}"
+  } > "${stats_temporary}"
+  mv -f -- "${stats_temporary}" "${stats_file}"
+  stats_temporary=""
+fi
+
+printf 'ATDD thumbnail metrics count=%s source_bytes=%s thumbnail_bytes=%s saved_bytes=%s duration_seconds=%s\n' \
+  "${thumbnail_count}" "${source_bytes}" "${thumbnail_bytes}" "${saved_bytes}" "${duration_seconds}"

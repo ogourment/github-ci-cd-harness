@@ -8,6 +8,7 @@ evidence_dir="${test_root}/acceptance evidence"
 screenshots_dir="${evidence_dir}/screenshots"
 bin_dir="${test_root}/bin"
 args_log="${test_root}/converter-args"
+stats_file="${test_root}/thumbnail-stats.env"
 mkdir -p "${screenshots_dir}/nested" "${bin_dir}"
 printf 'png' > "${screenshots_dir}/step one.png"
 printf 'png' > "${screenshots_dir}/--shell-safe.png"
@@ -26,6 +27,7 @@ chmod +x "${bin_dir}/fake-magick"
 export CONVERTER_ARGS_LOG="${args_log}"
 
 PATH="${bin_dir}:${PATH}" ATDD_THUMBNAIL_CONVERTER=fake-magick \
+  ATDD_THUMBNAIL_STATS_FILE="${stats_file}" \
   scripts/atdd_generate_thumbnails.sh "${evidence_dir}"
 
 [[ -s "${evidence_dir}/thumbnails/step one.webp" ]]
@@ -39,6 +41,15 @@ grep -Fxq '480x>' "${args_log}"
 grep -Fxq -- '-strip' "${args_log}"
 grep -Fxq -- '-quality' "${args_log}"
 grep -Fxq '70' "${args_log}"
+grep -Fxq 'ATDD_THUMBNAIL_COUNT=3' "${stats_file}"
+grep -Fxq 'ATDD_THUMBNAIL_SOURCE_BYTES=9' "${stats_file}"
+grep -Fxq 'ATDD_THUMBNAIL_BYTES=15' "${stats_file}"
+grep -Fxq 'ATDD_THUMBNAIL_SAVED_BYTES=-6' "${stats_file}"
+grep -Eq '^ATDD_THUMBNAIL_DURATION_SECONDS=[0-9]+$' "${stats_file}"
+if find "${test_root}" -maxdepth 1 -name 'thumbnail-stats.env.tmp.*' | grep -q .; then
+  echo "expected thumbnail metrics to be written atomically" >&2
+  exit 1
+fi
 
 # Re-running replaces the same outputs rather than accumulating alternates.
 PATH="${bin_dir}:${PATH}" ATDD_THUMBNAIL_CONVERTER=fake-magick \

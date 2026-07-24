@@ -141,6 +141,9 @@ acceptance_evidence:
         set -e
 
         if [ "$acceptance_live_evidence_exit_code" -eq 0 ]; then
+          printf '%s\n' "$acceptance_live_evidence_output" |
+            grep '^ACCEPTANCE_METRIC ' \
+              > "${ACCEPTANCE_EVIDENCE_DIR%/}/live_evidence_metrics.log" || true
           acceptance_live_evidence_url="$(printf '%s\n' "$acceptance_live_evidence_output" | sed '/^[[:space:]]*$/d' | tail -n 1)"
           if printf '%s' "$acceptance_live_evidence_url" | grep -Eq '^https?://'; then
             acceptance_live_evidence_status="ok"
