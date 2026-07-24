@@ -9,6 +9,9 @@ trap '[[ -z "$holder_pid" ]] || kill "$holder_pid" 2>/dev/null || true; rm -rf "
 
 RESOURCE_LOCK_DIR="$fixtures" "$script" test-command -- true
 
+# The smoke invocation above leaves its holder record behind. Remove it so the
+# background holder below can use a newly written record as its ready signal.
+rm -f "$fixtures/test-command.lock"
 RESOURCE_LOCK_DIR="$fixtures" "$script" test-command -- sleep 2 &
 holder_pid=$!
 for _ in $(seq 1 50); do
