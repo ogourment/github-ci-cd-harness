@@ -4,7 +4,7 @@ set -euo pipefail
 test_root="$(mktemp -d)"
 trap 'rm -rf "${test_root}"' EXIT
 
-real_rsync="$(command -v rsync)"
+real_rsync="$(command -v rsync || true)"
 bin_dir="${test_root}/bin"
 inventory="${test_root}/inventory"
 key_file="${test_root}/deploy-key"
@@ -178,18 +178,20 @@ grep -Fq 'resource_group: "$CI_PROJECT_PATH_SLUG-acceptance-evidence"' \
 # Regenerated screenshots commonly keep identical bytes but receive new
 # mtimes. The snapshot options must still let rsync hard-link those files to
 # the previous snapshot.
-hardlink_source="${test_root}/hardlink-source"
-hardlink_basis="${test_root}/hardlink-basis"
-hardlink_destination="${test_root}/hardlink-destination"
-mkdir -p "${hardlink_source}" "${hardlink_basis}"
-printf 'unchanged screenshot\n' > "${hardlink_source}/step.png"
-printf 'unchanged screenshot\n' > "${hardlink_basis}/step.png"
-touch -d '2026-07-20 12:00:00 UTC' "${hardlink_basis}/step.png"
-touch -d '2026-07-21 12:00:00 UTC' "${hardlink_source}/step.png"
-"${real_rsync}" --archive --no-times --checksum \
-  "--link-dest=${hardlink_basis}" \
-  "${hardlink_source}/" "${hardlink_destination}/"
-[[ "$(stat -c '%i' "${hardlink_basis}/step.png")" == \
-  "$(stat -c '%i' "${hardlink_destination}/step.png")" ]]
+if [[ -n "${real_rsync}" ]]; then
+  hardlink_source="${test_root}/hardlink-source"
+  hardlink_basis="${test_root}/hardlink-basis"
+  hardlink_destination="${test_root}/hardlink-destination"
+  mkdir -p "${hardlink_source}" "${hardlink_basis}"
+  printf 'unchanged screenshot\n' > "${hardlink_source}/step.png"
+  printf 'unchanged screenshot\n' > "${hardlink_basis}/step.png"
+  touch -d '2026-07-20 12:00:00 UTC' "${hardlink_basis}/step.png"
+  touch -d '2026-07-21 12:00:00 UTC' "${hardlink_source}/step.png"
+  "${real_rsync}" --archive --no-times --checksum \
+    "--link-dest=${hardlink_basis}" \
+    "${hardlink_source}/" "${hardlink_destination}/"
+  [[ "$(stat -c '%i' "${hardlink_basis}/step.png")" == \
+    "$(stat -c '%i' "${hardlink_destination}/step.png")" ]]
+fi
 
 echo "atdd_remote_copy_test: passed"
