@@ -155,14 +155,14 @@ commit_messages() {
   if [ -n "$before_sha" ] &&
     [ "$before_sha" != "0000000000000000000000000000000000000000" ] &&
     git cat-file -e "${before_sha}^{commit}" 2>/dev/null; then
-    messages="$(git log --format=%s "${before_sha}..${CI_COMMIT_SHA:-HEAD}")"
+    messages="$(git log --format="%h %s" "${before_sha}..${CI_COMMIT_SHA:-HEAD}")"
     if [ -n "$messages" ]; then
       printf '%s\n' "$messages"
       return
     fi
   fi
 
-  git log -1 --format=%s "${CI_COMMIT_SHA:-HEAD}"
+  git log -1 --format="%h %s" "${CI_COMMIT_SHA:-HEAD}"
 }
 
 remote_env_assignment() {

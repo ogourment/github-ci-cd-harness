@@ -212,10 +212,13 @@ public host.
 Fast SSH deploys call the remote deploy helper with app-prefixed metadata
 environment variables. The default prefix is the uppercased `CI_CD_OTP_APP`
 value, for example `AGILE_U_APP_NAME`, `AGILE_U_APP_VERSION`,
-`AGILE_U_GIT_SHA`, `AGILE_U_DEPLOY_ACTOR`, `AGILE_U_CI_PIPELINE_ID`,
+`AGILE_U_GIT_SHA`, `AGILE_U_GIT_MESSAGES`, `AGILE_U_DEPLOY_ACTOR`,
+`AGILE_U_CI_PIPELINE_ID`,
 `AGILE_U_CI_PIPELINE_URL`,
 `AGILE_U_CI_JOB_ID`, `AGILE_U_CI_JOB_WAIT_SECONDS`, and
 `AGILE_U_CI_PIPELINE_CREATED_AT_EPOCH`.
+Each line in `AGILE_U_GIT_MESSAGES` begins with its short commit SHA so
+deployment history can show an auditable `SHA message` list.
 Override the prefix with
 `CI_CD_REMOTE_ENV_PREFIX` only when the remote helper already expects another
 name.

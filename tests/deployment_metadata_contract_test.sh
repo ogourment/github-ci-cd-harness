@@ -6,6 +6,8 @@ fast_deploy="${root}/scripts/deploy_release_fast.sh"
 host_deploy="${root}/ansible/roles/phoenix_blue_green/templates/phoenix_deploy.sh.j2"
 
 grep -Fq 'remote_env_assignment "${remote_env_prefix}_CI_PIPELINE_URL" "${CI_PIPELINE_URL:-}"' "${fast_deploy}"
+grep -Fq 'git log --format="%h %s" "${before_sha}..${CI_COMMIT_SHA:-HEAD}"' "${fast_deploy}"
+grep -Fq 'git log -1 --format="%h %s" "${CI_COMMIT_SHA:-HEAD}"' "${fast_deploy}"
 
 for suffix in GIT_SHA GIT_REF GIT_SUBJECT GIT_MESSAGES CI_PIPELINE_URL; do
   grep -Fq "metadata_value ${suffix}" "${host_deploy}"
