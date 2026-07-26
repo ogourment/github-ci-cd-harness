@@ -117,16 +117,16 @@ orchestration and contract validation.
 
 - [ ] A candidate that returns HTTP 500 for the configured public smoke path
       never becomes the committed live color.
-- [ ] A public smoke response must be 2xx HTML and the public readiness response
+- [x] A public smoke response must be 2xx HTML and the public readiness response
       must identify the candidate release, pipeline, and color.
 - [ ] After a successful deploy, stopping the live Phoenix service during the
       standby window causes new HTTP requests to reach the previous color.
-- [ ] The standby is removed from NGINX before its service is stopped.
+- [x] The standby is removed from NGINX before its service is stopped.
 - [ ] A second deploy or manual rollback cannot let an old timer stop the
       current live color.
-- [ ] With standby disabled, deployment behavior remains unchanged apart from
+- [x] With standby disabled, deployment behavior remains unchanged apart from
       proxy correctness and the new public post-cutover verification.
-- [ ] NGINX configuration validates when two applications share one host.
+- [x] NGINX configuration validates when two applications share one host.
 - [ ] WebSocket/LiveView clients reconnect after a failed live process; no
       seamless transfer of established sockets is claimed.
 
@@ -271,11 +271,11 @@ Tasks:
 - [x] Provision a host with two applications and pass `nginx -t`.
 - [ ] Deploy a fixture whose readiness check passes but public page returns
       500; confirm traffic and `current_color` remain on the previous release.
-- [ ] Deploy a healthy fixture; confirm both colors answer independently during
+- [x] Deploy a healthy fixture; confirm both colors answer independently during
       the standby window.
 - [ ] Stop the live service mid-window while repeatedly requesting the public
       URL; confirm new requests reach the previous color.
-- [ ] Confirm the standby timer removes the backup before stopping its service.
+- [x] Confirm the standby timer removes the backup before stopping its service.
 - [ ] Start another deploy during the standby window; confirm the stale timer
       cannot affect the new live color.
 - [ ] Confirm CI and host notifications distinguish a rejected candidate from
