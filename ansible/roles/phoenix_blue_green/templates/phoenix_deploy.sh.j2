@@ -320,10 +320,15 @@ if [[ "${STANDBY_SEC}" -gt 0 && -f "${CURRENT_COLOR_FILE}" ]]; then
 fi
 
 echo "==> Staging release..."
-rm -rf "${RELEASE_DIR}"
-mkdir -p "${RELEASE_DIR}"
-rsync -a --delete "${SRC_DIR}/" "${RELEASE_DIR}/"
-chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "${RELEASE_DIR}"
+CURRENT_RELEASE_DIR="$(readlink -f "${STAGE_ROOT}/${CURRENT_COLOR}" 2>/dev/null || true)"
+if [[ "${CURRENT_RELEASE_DIR}" == "${RELEASE_DIR}" && -d "${RELEASE_DIR}" ]]; then
+  echo "==> Reusing live release directory for exact-release retry"
+else
+  rm -rf "${RELEASE_DIR}"
+  mkdir -p "${RELEASE_DIR}"
+  rsync -a --delete "${SRC_DIR}/" "${RELEASE_DIR}/"
+  chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "${RELEASE_DIR}"
+fi
 
 STATIC_SRC=""
 for dir in "${RELEASE_DIR}/lib/${OTP_APP}-"*/priv/static; do

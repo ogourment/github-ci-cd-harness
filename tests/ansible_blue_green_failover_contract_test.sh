@@ -48,6 +48,12 @@ cancel_line="$(grep -n 'cancel_standby_timer' "${deploy}" | tail -1 | cut -d: -f
 stage_line="$(grep -n 'echo "==> Staging release..."' "${deploy}" | cut -d: -f1)"
 test "${cancel_line}" -lt "${stage_line}"
 
+grep -Fq 'CURRENT_RELEASE_DIR="$(readlink -f "${STAGE_ROOT}/${CURRENT_COLOR}" 2>/dev/null || true)"' "${deploy}"
+grep -Fq 'if [[ "${CURRENT_RELEASE_DIR}" == "${RELEASE_DIR}" && -d "${RELEASE_DIR}" ]]; then' "${deploy}"
+reuse_line="$(grep -n 'Reusing live release directory' "${deploy}" | cut -d: -f1)"
+remove_line="$(grep -n 'rm -rf "${RELEASE_DIR}"' "${deploy}" | cut -d: -f1)"
+test "${reuse_line}" -lt "${remove_line}"
+
 grep -Fq 'verify_public_candidate' "${deploy}"
 verify_line="$(grep -n 'if ! verify_public_candidate; then' "${deploy}" | cut -d: -f1)"
 restore_line="$(grep -n '^  restore_current_upstream$' "${deploy}" | cut -d: -f1)"
