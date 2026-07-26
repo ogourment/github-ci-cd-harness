@@ -5,10 +5,9 @@
 #
 # Usage:  sudo {{ deploy_script_path }} <release_id> [migrate]
 #
-# Flow: stage release into the idle color → migrate → start → health-check
-# (version + color via {{ deploy_health_path }}) → rewrite nginx upstream →
-# reload → drain + stop old color → prune. User-visible downtime is 0 as long
-# as the new color passes its health check.
+# Flow: stage release into the idle color → migrate → start → readiness check
+# (version + color via {{ deploy_health_path }}) → candidate nginx cutover →
+# public identity + HTML smoke → commit color → bounded standby → prune.
 #
 set -euo pipefail
 
@@ -31,6 +30,18 @@ HEALTH_PATH="{{ deploy_health_path }}"
 HEALTH_TIMEOUT_SEC={{ deploy_health_timeout_sec }}
 HEALTH_INTERVAL_SEC=2
 DRAIN_SEC={{ deploy_drain_sec }}
+STANDBY_SEC={{ deploy_standby_sec }}
+STANDBY_END_SCRIPT="{{ deploy_standby_end_script }}"
+STANDBY_UNIT="{{ app_name }}-standby-end"
+
+UPSTREAM_MAX_FAILS={{ nginx_upstream_max_fails }}
+UPSTREAM_FAIL_TIMEOUT="{{ nginx_upstream_fail_timeout }}"
+
+PUBLIC_BASE_URL="{{ deploy_public_base_url }}"
+PUBLIC_IDENTITY_PATH="{{ deploy_public_identity_path }}"
+PUBLIC_SMOKE_PATH="{{ deploy_public_smoke_path }}"
+PUBLIC_SMOKE_CONTENT_TYPE="{{ deploy_public_smoke_content_type }}"
+PUBLIC_SMOKE_TIMEOUT_SEC={{ deploy_public_smoke_timeout_sec }}
 
 RELEASE_ID="${1:?release id required}"
 RUN_MIGRATIONS="${2:-}"
@@ -125,6 +136,157 @@ on_deploy_error() {
 }
 trap on_deploy_error ERR
 
+cancel_standby_timer() {
+  systemctl stop "${STANDBY_UNIT}.timer" "${STANDBY_UNIT}.service" 2>/dev/null || true
+  systemctl reset-failed "${STANDBY_UNIT}.timer" "${STANDBY_UNIT}.service" 2>/dev/null || true
+}
+
+write_upstream() {
+  local live_port="$1"
+  local standby_port="${2:-}"
+  local candidate previous had_previous=false
+
+  candidate="$(mktemp)"
+  previous="$(mktemp)"
+
+  {
+    printf 'upstream %s {\n' "${NGINX_UPSTREAM_NAME}"
+    if [[ -n "${standby_port}" ]]; then
+      printf '    server 127.0.0.1:%s max_fails=%s fail_timeout=%s;\n' \
+        "${live_port}" "${UPSTREAM_MAX_FAILS}" "${UPSTREAM_FAIL_TIMEOUT}"
+      printf '    server 127.0.0.1:%s backup max_fails=%s fail_timeout=%s;\n' \
+        "${standby_port}" "${UPSTREAM_MAX_FAILS}" "${UPSTREAM_FAIL_TIMEOUT}"
+    else
+      printf '    server 127.0.0.1:%s;\n' "${live_port}"
+    fi
+    printf '}\n'
+  } > "${candidate}"
+  chmod 0644 "${candidate}"
+
+  if [[ -f "${NGINX_UPSTREAM_FILE}" ]]; then
+    cp "${NGINX_UPSTREAM_FILE}" "${previous}"
+    had_previous=true
+  fi
+
+  mv "${candidate}" "${NGINX_UPSTREAM_FILE}"
+  if ! nginx -t; then
+    if [[ "${had_previous}" == "true" ]]; then
+      cp "${previous}" "${NGINX_UPSTREAM_FILE}"
+    else
+      rm -f "${NGINX_UPSTREAM_FILE}"
+    fi
+    rm -f "${previous}"
+    echo "ERROR: nginx rejected candidate upstream configuration" >&2
+    return 1
+  fi
+
+  rm -f "${previous}"
+  nginx -s reload
+}
+
+json_value() {
+  local file="$1"
+  local key="$2"
+  sed -nE "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" "${file}" | tail -1
+}
+
+verify_identity_file() {
+  local file="$1"
+  local actual_version actual_color actual_release_id actual_pipeline_id
+
+  actual_version="$(json_value "${file}" version)"
+  actual_color="$(json_value "${file}" color)"
+  actual_release_id="$(json_value "${file}" release_id)"
+  actual_pipeline_id="$(json_value "${file}" pipeline_id)"
+
+  if [[ "${actual_version}" == "${EXPECTED_VERSION}" &&
+        "${actual_color}" == "${TARGET_COLOR}" &&
+        "${actual_release_id}" == "${RELEASE_ID}" &&
+        "${actual_pipeline_id}" == "${CI_PIPELINE_ID}" ]]; then
+    return 0
+  fi
+
+  printf '%s\n' \
+    "ERROR: candidate identity mismatch" \
+    "  expected: version=${EXPECTED_VERSION} color=${TARGET_COLOR} release_id=${RELEASE_ID} pipeline_id=${CI_PIPELINE_ID}" \
+    "  actual:   version=${actual_version:-<missing>} color=${actual_color:-<missing>} release_id=${actual_release_id:-<missing>} pipeline_id=${actual_pipeline_id:-<missing>}" >&2
+  return 1
+}
+
+restore_current_upstream() {
+  local current_port
+  case "${CURRENT_COLOR}" in
+    blue) current_port="${PORT_BLUE}" ;;
+    green) current_port="${PORT_GREEN}" ;;
+  esac
+
+  echo "==> Restoring nginx upstream to current ${CURRENT_COLOR}..."
+  write_upstream "${current_port}"
+}
+
+verify_public_candidate() {
+  local smoke_url identity_url smoke_body smoke_headers identity_body
+  local status_code content_type
+
+  smoke_url="${PUBLIC_BASE_URL%/}${PUBLIC_SMOKE_PATH}"
+  identity_url="${PUBLIC_BASE_URL%/}${PUBLIC_IDENTITY_PATH}"
+  smoke_body="$(mktemp)"
+  smoke_headers="$(mktemp)"
+  identity_body="$(mktemp)"
+
+  echo "==> Verifying public HTML smoke ${smoke_url}..."
+  if ! status_code="$(curl --silent --show-error --location \
+    --connect-timeout "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
+    --max-time "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
+    --dump-header "${smoke_headers}" \
+    --output "${smoke_body}" \
+    --write-out '%{http_code}' \
+    "${smoke_url}")"; then
+    rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+    return 1
+  fi
+
+  case "${status_code}" in
+    2??) ;;
+    *)
+      echo "ERROR: public smoke expected 2xx from ${smoke_url}, got ${status_code}" >&2
+      rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+      return 1
+      ;;
+  esac
+
+  content_type="$(
+    grep -i '^Content-Type:' "${smoke_headers}" |
+      tail -1 |
+      cut -d: -f2- |
+      sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' |
+      tr -d '\r' || true
+  )"
+  if [[ "${content_type}" != "${PUBLIC_SMOKE_CONTENT_TYPE}"* ]]; then
+    echo "ERROR: public smoke expected Content-Type ${PUBLIC_SMOKE_CONTENT_TYPE}, got ${content_type:-<missing>}" >&2
+    rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+    return 1
+  fi
+  if ! grep -Eqi '<!doctype html|<html([[:space:]>])' "${smoke_body}"; then
+    echo "ERROR: public smoke expected an HTML document from ${smoke_url}" >&2
+    rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+    return 1
+  fi
+
+  echo "==> Verifying public candidate identity ${identity_url}..."
+  if ! curl --fail --silent --show-error --location \
+    --connect-timeout "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
+    --max-time "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
+    --output "${identity_body}" \
+    "${identity_url}" ||
+    ! verify_identity_file "${identity_body}"; then
+    rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+    return 1
+  fi
+
+  rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+}
+
 # --- Pick idle color ---------------------------------------------------------
 if [[ -f "${CURRENT_COLOR_FILE}" ]]; then
   CURRENT_COLOR="$(cat "${CURRENT_COLOR_FILE}")"
@@ -148,6 +310,15 @@ echo "==> Target color: ${TARGET_COLOR} (port ${TARGET_PORT})"
 
 [[ -d "${SRC_DIR}" ]] || { echo "ERROR: source ${SRC_DIR} missing" >&2; exit 1; }
 
+cancel_standby_timer
+if [[ "${STANDBY_SEC}" -gt 0 && -f "${CURRENT_COLOR_FILE}" ]]; then
+  if ! systemctl is-active --quiet "${CURRENT_SERVICE}"; then
+    echo "ERROR: current ${CURRENT_COLOR} service is not active; restore service or run rollback before deploying" >&2
+    exit 1
+  fi
+  "${STANDBY_END_SCRIPT}"
+fi
+
 echo "==> Staging release..."
 rm -rf "${RELEASE_DIR}"
 mkdir -p "${RELEASE_DIR}"
@@ -166,7 +337,7 @@ ln -sfn "${RELEASE_DIR}" "${TARGET_LINK}"
 
 # The systemd unit reads its environment from the per-slot file, not this
 # deploy process. Keep the release identifier alongside the static slot
-# metadata before starting the target so /health can attest the cutover.
+# metadata before starting the target so readiness can attest the cutover.
 TARGET_ENV_FILE="${ENV_FILE_BASE}_${TARGET_COLOR}"
 tmp_env="$(mktemp)"
 grep -Ev "^(${RELEASE_ID_ENV_VAR}|${PIPELINE_ID_ENV_VAR}|${GIT_SHA_ENV_VAR}|${GIT_REF_ENV_VAR}|${GIT_SUBJECT_ENV_VAR}|${GIT_MESSAGES_ENV_VAR}|${PIPELINE_URL_ENV_VAR}|${DEPLOYED_AT_ENV_VAR})=" "${TARGET_ENV_FILE}" > "${tmp_env}" || true
@@ -205,39 +376,41 @@ systemctl restart "${TARGET_SERVICE}"
 EXPECTED_VERSION="$(ls "${RELEASE_DIR}/releases/" 2>/dev/null | head -1 || true)"
 [[ -n "${EXPECTED_VERSION}" ]] || { echo "ERROR: cannot determine release version" >&2; exit 1; }
 
-echo "==> Health-checking http://127.0.0.1:${TARGET_PORT}${HEALTH_PATH} (version=${EXPECTED_VERSION}, color=${TARGET_COLOR}, release=${RELEASE_ID}, pipeline=${CI_PIPELINE_ID})..."
+echo "==> Readiness-checking http://127.0.0.1:${TARGET_PORT}${HEALTH_PATH} (version=${EXPECTED_VERSION}, color=${TARGET_COLOR}, release=${RELEASE_ID}, pipeline=${CI_PIPELINE_ID})..."
 deadline=$(( $(date +%s) + HEALTH_TIMEOUT_SEC ))
+readiness_body="$(mktemp)"
 while true; do
-  resp="$(curl -sf --max-time 2 "http://127.0.0.1:${TARGET_PORT}${HEALTH_PATH}" 2>/dev/null || true)"
-  if [[ -n "${resp}" ]]; then
-    actual_version="$(printf '%s' "${resp}" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || true)"
-    actual_color="$(printf '%s' "${resp}" | grep -o '"color":"[^"]*"' | cut -d'"' -f4 || true)"
-    actual_release_id="$(printf '%s' "${resp}" | grep -o '"release_id":"[^"]*"' | cut -d'"' -f4 || true)"
-    actual_pipeline_id="$(printf '%s' "${resp}" | grep -o '"pipeline_id":"[^"]*"' | cut -d'"' -f4 || true)"
-    if [[ "${actual_version}" == "${EXPECTED_VERSION}" && "${actual_color}" == "${TARGET_COLOR}" && "${actual_release_id}" == "${RELEASE_ID}" && "${actual_pipeline_id}" == "${CI_PIPELINE_ID}" ]]; then
-      echo "    ${TARGET_COLOR} healthy: version=${actual_version}, color=${actual_color}, release=${actual_release_id}, pipeline=${actual_pipeline_id}"
-      break
-    fi
-    echo "    /health identity mismatch; expected version=${EXPECTED_VERSION}, color=${TARGET_COLOR}, release=${RELEASE_ID}, pipeline=${CI_PIPELINE_ID}; got version=${actual_version:-?}, color=${actual_color:-?}, release=${actual_release_id:-?}, pipeline=${actual_pipeline_id:-?}; retrying..."
+  if curl --fail --silent --show-error --max-time 2 \
+    --output "${readiness_body}" \
+    "http://127.0.0.1:${TARGET_PORT}${HEALTH_PATH}" &&
+    verify_identity_file "${readiness_body}"; then
+    echo "    ${TARGET_COLOR} ready: version=${EXPECTED_VERSION}, release=${RELEASE_ID}, pipeline=${CI_PIPELINE_ID}"
+    break
   fi
   if [[ $(date +%s) -ge ${deadline} ]]; then
-    echo "ERROR: ${TARGET_COLOR} failed health check after ${HEALTH_TIMEOUT_SEC}s; ${CURRENT_COLOR} still live." >&2
+    rm -f "${readiness_body}"
+    echo "ERROR: ${TARGET_COLOR} failed readiness after ${HEALTH_TIMEOUT_SEC}s; ${CURRENT_COLOR} still live." >&2
     systemctl stop "${TARGET_SERVICE}" || true
     exit 1
   fi
   sleep "${HEALTH_INTERVAL_SEC}"
 done
+rm -f "${readiness_body}"
 
-echo "==> Cutting nginx upstream → 127.0.0.1:${TARGET_PORT}"
-tmp="$(mktemp)"
-cat > "${tmp}" <<EOF
-upstream ${NGINX_UPSTREAM_NAME} {
-    server 127.0.0.1:${TARGET_PORT};
-}
-EOF
-mv "${tmp}" "${NGINX_UPSTREAM_FILE}"
-nginx -t
-nginx -s reload
+case "${CURRENT_COLOR}" in
+  blue) CURRENT_PORT="${PORT_BLUE}" ;;
+  green) CURRENT_PORT="${PORT_GREEN}" ;;
+esac
+
+echo "==> Candidate cutover: ${TARGET_COLOR} primary, ${CURRENT_COLOR} backup..."
+write_upstream "${TARGET_PORT}" "${CURRENT_PORT}"
+
+if ! verify_public_candidate; then
+  echo "ERROR: candidate failed public verification; aborting cutover and fixing forward is required" >&2
+  restore_current_upstream
+  systemctl stop "${TARGET_SERVICE}" || true
+  exit 1
+fi
 
 echo "${TARGET_COLOR}" > "${CURRENT_COLOR_FILE}"
 chown "${DEPLOY_USER}:${DEPLOY_USER}" "${CURRENT_COLOR_FILE}"
@@ -260,9 +433,24 @@ sudo -u "${DEPLOY_USER}" env \
 {% endif %}
 
 if [[ "${CURRENT_COLOR}" != "${TARGET_COLOR}" ]] && systemctl is-active --quiet "${CURRENT_SERVICE}"; then
-  echo "==> Draining old ${CURRENT_COLOR} for ${DRAIN_SEC}s, then stopping..."
-  sleep "${DRAIN_SEC}"
-  systemctl stop "${CURRENT_SERVICE}" || true
+  if [[ "${STANDBY_SEC}" -gt 0 ]]; then
+    echo "==> Keeping ${CURRENT_COLOR} as standby for ${STANDBY_SEC}s..."
+    if ! systemd-run \
+      --unit="${STANDBY_UNIT}" \
+      --on-active="${STANDBY_SEC}s" \
+      --property=Type=oneshot \
+      "${STANDBY_END_SCRIPT}"; then
+      echo "WARNING: standby timer could not be scheduled; retiring standby now" >&2
+      "${STANDBY_END_SCRIPT}"
+    fi
+  else
+    echo "==> Draining old ${CURRENT_COLOR} for ${DRAIN_SEC}s, then stopping..."
+    sleep "${DRAIN_SEC}"
+    write_upstream "${TARGET_PORT}"
+    systemctl stop "${CURRENT_SERVICE}" || true
+  fi
+else
+  write_upstream "${TARGET_PORT}"
 fi
 
 echo "==> Cutover complete. Active = ${TARGET_COLOR}."

@@ -1,191 +1,160 @@
-# nginx passive failover between blue/green Phoenix instances
+# Plan: bounded same-host failover for blue/green Phoenix
 
-Status: **planned, not implemented.** Decision recorded 2026-07-26 against
-`main` @ `ce6621e`. No code in this repository has changed yet.
+Status: **implementation in progress.**
 
-## 1. Background
+## Goal
 
-Q: how easy is it to configure nginx for automatic failover between two
-(blue/green) app (elixir phoenix) instances on the same box?
+Make blue/green production deploys survive two common failures without adding
+another host:
 
-A: Mechanically, it is easy. NGINX can treat one Phoenix instance as primary and
-the other as a backup, both listening on different loopback ports. The more
-difficult parts are WebSocket behavior, application state, health-check
-semantics, and database compatibility during deployments.
+1. reject a new release that starts but cannot serve a real production page;
+2. temporarily fail over to the previous color if the new Phoenix process or
+   port fails shortly after deployment.
 
-A basic active/passive configuration:
+This is a practical first step toward high availability. It improves release
+resilience on one host; it is not host-level HA.
 
-```nginx
-# Inside the http {} block
-map $http_upgrade $connection_upgrade {
-    default upgrade;
-    ''      close;
-}
+## Why this is needed
 
-upstream phoenix_app {
-    # Blue: normally receives all new connections
-    server 127.0.0.1:4000 max_fails=1 fail_timeout=5s;
+A release can pass staging acceptance and still fail only in production. One
+observed class of failure is runtime code depending on a build tool that exists
+in staging but is deliberately absent from the production release. The Phoenix
+process starts and its health endpoint passes, while real pages return HTTP 500.
 
-    # Green: used when blue is unavailable
-    server 127.0.0.1:4001 backup;
+The existing direct readiness check could pass because the BEAM, endpoint, and
+database were healthy. NGINX passive failover would not help either: HTTP 500
+is a valid upstream response, not a connection failure.
 
-    keepalive 32;
-}
+The deployment contract therefore needs three distinct checks:
 
-server {
-    listen 443 ssl;
-    server_name app.example.com;
+- **Liveness:** the Phoenix process responds through a cheap application route.
+- **Readiness:** the release identity and required dependencies are correct.
+- **Synthetic smoke:** a public request through TLS and NGINX renders a
+  representative production page as HTML.
 
-    # TLS configuration omitted
+Endpoint names are not standardized by this plan. `/health`, `/health/deep`,
+`/api/health/live`, and `/api/health/ready` are all valid names when their
+configured behavior satisfies the contract.
 
-    location / {
-        proxy_pass http://phoenix_app;
-        proxy_http_version 1.1;
+## Contract and ownership
 
-        proxy_set_header Host              $host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+The application owns application semantics. The harness owns deployment
+orchestration and contract validation.
 
-        # Phoenix Channels / LiveView WebSockets
-        proxy_set_header Upgrade    $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
+### Consumer application responsibilities
 
-        proxy_connect_timeout 1s;
-        proxy_read_timeout 75s;
+- Implement an unauthenticated readiness endpoint. A route such as
+  `/health/deep` is application code supplied and tested by the consumer, not
+  by this repository.
+- Return 2xx JSON only when the release is ready for traffic. Return non-2xx,
+  normally 503, when a required database, schema, queue, or other
+  application-defined dependency is unavailable.
+- Include `version`, `release_id`, `pipeline_id`, and `color` in every
+  successful readiness response:
 
-        proxy_next_upstream error timeout invalid_header
-                            http_502 http_503 http_504;
-        proxy_next_upstream_tries 2;
-    }
-}
-```
+  ```json
+  {
+    "status": "ready",
+    "version": "1.2.3",
+    "release_id": "v1.2.3-abcdef12-1234",
+    "pipeline_id": "1234",
+    "color": "blue"
+  }
+  ```
 
-NGINX's `backup` parameter sends traffic to that server only when the primary
-servers are unavailable. In open-source NGINX, `max_fails` and `fail_timeout`
-provide passive failure detection: failures observed while handling real traffic
-temporarily mark the server unavailable. ([Nginx][1])
+- The `status` value and additional fields are consumer-defined. HTTP status is
+  authoritative; the harness validates the four identity fields above.
+- Source identity from the environment written into the deployed slot. Do not
+  infer mutable host state or depend on development/build tools at runtime.
+- Keep a liveness endpoint cheap and independent of optional external services
+  when the application exposes one. Liveness is useful for process monitoring;
+  readiness is the deploy gate.
+- Configure a stable, unauthenticated HTML smoke path that exercises a real
+  production rendering path. A JSON health route is not a synthetic smoke.
+- Test the readiness success and failure cases, identity fields, HTTP statuses,
+  and smoke path in the application repository.
+- Confirm that migrations are backward-compatible and that running both colors
+  during the selected standby window cannot duplicate unsafe scheduled or
+  singleton work.
 
-The important limitation is that this is not continuous health checking. When
-blue fails, a request may first encounter blue's connection failure and then be
-retried against green. After `fail_timeout`, NGINX will periodically try blue
-again. Periodic active health checks using a dedicated endpoint such as
-`/healthz` are built into NGINX Plus, not standard open-source NGINX.
-([Nginx][2])
+### Harness responsibilities
 
-WebSockets require the explicit HTTP/1.1 upgrade headers shown above. An
-already-established WebSocket cannot be moved from blue to green: it disconnects
-and the client must reconnect. ([Nginx][3]) For Phoenix LiveView, the client
-automatically reconnects with exponential backoff, and the new connection can be
-routed to the surviving instance. However, process-local LiveView state may be
-lost unless it can be reconstructed from parameters, sessions, or persistent
-storage. ([Hexdocs][4])
+- Accept consumer-configured readiness and public smoke paths without assigning
+  application-specific meaning to their names.
+- Inject expected release, pipeline, and color identity into the target slot.
+- Verify readiness directly on the candidate loopback port before cutover.
+- Verify the same identity through public HTTPS after NGINX cutover, then verify
+  the public HTML smoke path.
+- Reject missing fields, identity mismatches, non-2xx responses, wrong content
+  types, timeouts, and connection failures.
+- Own NGINX upstream generation, reload validation, standby scheduling,
+  cutover commit/abort behavior, and generic contract tests.
+- Never implement or guess consumer dependency checks. A database-only default
+  would be incorrect for applications whose readiness also depends on queues,
+  storage, migrations, or another required service.
 
-There is also an important retry-safety constraint. By default, NGINX does not
-retry non-idempotent requests such as `POST` or `PATCH` after they have already
-been sent upstream. Enabling `non_idempotent` retries can duplicate writes, so it
-should generally remain disabled unless the application implements idempotency
-keys or equivalent protection. NGINX also cannot switch servers after part of the
-response has already reached the client. ([Nginx][5])
+## Decisions and boundaries
 
-Assessment of the generic approach:
+- Keep the previous color as an NGINX `backup` for a bounded standby window.
+- Default `deploy_standby_sec` to `0`; consumers opt in after checking that
+  running two releases briefly is safe. Recommend `300` seconds initially.
+- A cutover is not committed until the public identity check and synthetic
+  smoke both pass through NGINX.
+- If post-cutover verification fails, abort the cutover: restore the prior
+  color as the sole upstream, stop the candidate, fail the deployment, and fix
+  forward with a new release.
+- Never reverse migrations, delete the candidate release, or run the rollback
+  script automatically. Database migrations must remain backward-compatible
+  with the previous color for the standby window.
+- Keep NGINX retry policy at connection and timeout failures. Do not retry
+  generic HTTP 500/502/503/504 responses; doing so can mask application errors
+  and duplicate non-idempotent work.
+- A consumer with unsafe duplicate schedulers, singleton processes, or
+  background work must keep `deploy_standby_sec: 0` until that work is
+  coordinated across instances.
 
-* **Basic automatic process failover:** easy.
-* **Reliable failover for normal HTTP traffic:** straightforward.
-* **Seamless failover for existing WebSockets:** impossible; reconnect is required.
-* **Application-aware active health checks with NGINX OSS:** requires an external monitor or a different proxy.
-* **Protection against the entire machine failing:** none, because both instances and NGINX share the same host.
+## Success criteria
 
-## 2. Why this does not drop into this repository as written
+- [ ] A candidate that returns HTTP 500 for the configured public smoke path
+      never becomes the committed live color.
+- [ ] A public smoke response must be 2xx HTML and the public readiness response
+      must identify the candidate release, pipeline, and color.
+- [ ] After a successful deploy, stopping the live Phoenix service during the
+      standby window causes new HTTP requests to reach the previous color.
+- [ ] The standby is removed from NGINX before its service is stopped.
+- [ ] A second deploy or manual rollback cannot let an old timer stop the
+      current live color.
+- [ ] With standby disabled, deployment behavior remains unchanged apart from
+      proxy correctness and the new public post-cutover verification.
+- [ ] NGINX configuration validates when two applications share one host.
+- [ ] WebSocket/LiveView clients reconnect after a failed live process; no
+      seamless transfer of established sockets is claimed.
 
-The design above assumes **both instances are running**. This repository's
-blue/green deliberately stops the idle one.
+## Implementation
 
-| Location | Behavior |
-| --- | --- |
-| `ansible/roles/phoenix_blue_green/templates/phoenix_deploy.sh.j2:262-266` | After cutover, drains `deploy_drain_sec` then `systemctl stop` the old color |
-| `ansible/roles/phoenix_blue_green/templates/phoenix_rollback.sh.j2:72-73` | Same, in reverse |
-| `ansible/roles/phoenix_blue_green/tasks/main.yml:128-134` | On provision, starts only colors that have a release |
-| `ansible/roles/phoenix_blue_green/tasks/main.yml:89-99` | Seeds a single-server upstream include |
+### 1. Correct and parameterize the shared NGINX proxy
 
-Adding `server 127.0.0.1:4001 backup;` today would point at a closed socket in
-steady state. nginx would fail over to it, burn a `proxy_next_upstream` try, and
-return 502 anyway. The feature would be inert — worse than absent, because it
-looks like coverage.
+Files:
 
-Making it real means keeping the previous color running, which is a genuine
-behavior change with consequences the generic write-up does not cover:
+- `ansible/roles/web/defaults/main.yml`
+- `ansible/roles/web/templates/app.nginx.j2`
 
-1. **Two releases against one database.** Migration backward-compatibility stops
-   being a one-deploy constraint and becomes a standing one for as long as both
-   are up.
-2. **Duplicate scheduled work.** Oban/Quantum/GenServer singletons in the old
-   release keep firing. For any consumer running background jobs this is a
-   correctness bug, not just a resource cost.
-3. **Failover silently serves stale code.** Often the right call — the likeliest
-   reason the live color died is the release just shipped — but nothing tells an
-   operator they are being served N-1.
-4. **`max_fails=1 fail_timeout=5s` re-probes the dead primary with real traffic
-   every 5s.** During a restart, users alternate between the two releases
-   request-by-request.
+Tasks:
 
-### Two corrections to the generic config
+- [x] Replace the hardcoded `Connection "upgrade"` header in both proxy
+      locations with a per-site `map $http_upgrade` variable.
+- [x] Map a non-WebSocket request to an empty `Connection` value, not `close`,
+      so upstream keepalive remains possible.
+- [x] Add configurable connect, read, send, retry-policy, and retry-count
+      defaults.
+- [x] Use `proxy_next_upstream error timeout invalid_header` with two tries.
+      Exclude HTTP status retries and `non_idempotent`.
+- [x] Give each site a unique map variable so multiple vhosts pass `nginx -t`.
 
-* **`keepalive 32` is dead weight as written.** The map sends `Connection: close`
-  for non-WebSocket requests, defeating the keepalive pool it just declared. The
-  websocket-plus-keepalive form maps `'' → ''`, not `close`.
-* **`http_503` in `proxy_next_upstream` is unsafe here.** A Phoenix app returning
-  503 while booting, or from a deliberate maintenance path, would be retried
-  against the previous release instead of surfacing that state. Drop
-  `http_502`/`http_503`/`http_504`; the default `error timeout` already covers
-  the connection-refused case that standby exists for.
-
-### A pre-existing bug found while reviewing
-
-`ansible/roles/web/templates/app.nginx.j2:29` and `:136` hardcode
-`proxy_set_header Connection "upgrade"` on **every** proxied request, including
-plain HTTP. The `map $http_upgrade` construct is the correct fix and is worth
-landing regardless of which failover option is chosen.
-
-## 3. Decision
-
-**Bounded standby window.** After a cutover, the previous color keeps running for
-a configurable number of seconds registered as the nginx `backup` upstream, then
-a transient systemd timer retires it.
-
-This covers the risk that actually matters — the fresh release dying moments
-after going live — while bounding the dual-schema and duplicate-scheduler
-exposure to that window instead of making it permanent.
-
-Rejected alternatives:
-
-* **Permanent hot standby** — real continuous failover, but permanent duplicate
-  background jobs and a permanent two-release schema constraint. Only safe for
-  consumers with no scheduled work; too sharp an edge for a shared harness
-  default.
-* **Proxy hardening only** — no new risk, but leaves the 502-until-someone-
-  notices window that prompted the question.
-
-Default is `deploy_standby_sec: 0`, which preserves today's behavior exactly.
-Consumers opt in per app.
-
-## 4. Implementation plan
-
-Progress: 0/19 — 16 implementation items, 3 host verification items.
-
-### Step 1 — `web` role: proxy hardening (independent, land first)
-
-- [ ] Add the new defaults to `ansible/roles/web/defaults/main.yml`
-- [ ] Add the `map` block above the first `server {}` in `app.nginx.j2`
-- [ ] Update **both** `location /` blocks (lines 21-30 and 128-137)
-
-New defaults in `ansible/roles/web/defaults/main.yml`:
+Defaults:
 
 ```yaml
-# nginx variables are global to http {}, so each site needs its own name or a
-# second app on the box makes the map a duplicate-declaration error.
 nginx_connection_upgrade_var: "{{ app_name | replace('-', '_') }}_connection_upgrade"
-
 nginx_proxy_next_upstream: "error timeout invalid_header"
 nginx_proxy_next_upstream_tries: 2
 nginx_proxy_connect_timeout: "2s"
@@ -193,25 +162,18 @@ nginx_proxy_read_timeout: "75s"
 nginx_proxy_send_timeout: "75s"
 ```
 
-In `app.nginx.j2`, add the map above the first `server {}` block. Debian includes
-`sites-enabled/*` from inside `http {}`, so this is the correct level — no new
-`conf.d` file needed:
+### 2. Add bounded standby lifecycle
 
-```nginx
-map $http_upgrade ${{ nginx_connection_upgrade_var }} {
-    default upgrade;
-    ''      '';
-}
-```
+Files:
 
-Then in **both** `location /` blocks (lines 21-30 and 128-137), replace
-`Connection "upgrade"` with `Connection ${{ nginx_connection_upgrade_var }}` and
-add the timeout and `proxy_next_upstream` directives.
+- `ansible/roles/phoenix_blue_green/defaults/main.yml`
+- `ansible/roles/phoenix_blue_green/tasks/main.yml`
+- new
+  `ansible/roles/phoenix_blue_green/templates/phoenix_standby_end.sh.j2`
+- `ansible/roles/phoenix_blue_green/templates/phoenix_deploy.sh.j2`
+- `ansible/roles/phoenix_blue_green/templates/phoenix_rollback.sh.j2`
 
-### Step 2 — `phoenix_blue_green` role: new defaults
-
-- [ ] Add the four new defaults, with the duplicate-scheduled-work hazard
-      documented in the comment above `deploy_standby_sec`
+Defaults:
 
 ```yaml
 deploy_standby_sec: 0
@@ -220,125 +182,137 @@ nginx_upstream_max_fails: 1
 nginx_upstream_fail_timeout: "5s"
 ```
 
-### Step 3 — new `phoenix_standby_end.sh.j2` template
+Tasks:
 
-- [ ] Write the template
-- [ ] Install it from `tasks/main.yml` alongside the deploy and rollback
-      scripts (`mode: "0755"`, root-owned)
+- [x] Add a shared `write_upstream <live_port> [standby_port]` helper. With a
+      standby it writes the live server plus a `backup`; without one it writes
+      the current single-server form.
+- [x] Install a root-owned standby-end script that re-reads `current_color`,
+      rewrites NGINX to live-only, reloads NGINX, and only then stops the other
+      color.
+- [x] Before staging a new release, cancel any pending standby timer and retire
+      the old standby. Never overwrite a release beneath a running BEAM.
+- [x] After a committed cutover, schedule standby retirement with a transient
+      systemd timer. Do not block CI for the standby duration.
+- [x] At manual rollback start, cancel the timer. Keep manual rollback
+      single-upstream; the known-bad release must not become its backup.
 
-Installed at `deploy_standby_end_script`. Re-reads `current_color` rather than
-taking the color as an argument, so a rollback or a second deploy during the
-window cannot let a stale timer stop whichever instance is actually serving.
+### 3. Make cutover transactional
 
-Order matters: rewrite the upstream to live-only and reload **before**
-`systemctl stop` on the standby, so no request is failed over to a port that is
-already closing.
+Files:
 
-### Step 4 — `phoenix_deploy.sh.j2`
+- `ansible/roles/phoenix_blue_green/defaults/main.yml`
+- `ansible/roles/phoenix_blue_green/templates/phoenix_deploy.sh.j2`
 
-- [ ] Add the `write_upstream` helper and use it at both existing rewrite sites
-- [ ] Retire any existing standby before staging (gated on `STANDBY_SEC > 0`)
-- [ ] Replace drain-then-stop at cutover with backup-upstream plus scheduled
-      retirement (gated on `STANDBY_SEC > 0`)
+Add consumer-configurable public verification:
 
-Add a `write_upstream <live_port> [standby_port]` helper; with two ports it
-emits the live server with `max_fails`/`fail_timeout` plus a `backup` line, with
-one port it emits today's single-server form. Use it at both existing rewrite
-sites.
-
-Two behavior changes, both gated on `STANDBY_SEC > 0`:
-
-* **Before staging** (after the `SRC_DIR` check at line 149): cancel any pending
-  `{{ app_name }}-standby-end` timer, `systemctl reset-failed` it, then invoke
-  the standby-end script. The target color may still be up as the previous
-  deploy's standby; retiring it here means its release directory is not rewritten
-  underneath a running BEAM, and means the health check remains the first thing
-  that ever sends traffic to the new release. Without this, a hiccup on the live
-  color during the health-check phase would route real users onto an
-  un-health-checked release — exactly what blue/green exists to prevent.
-* **At cutover** (line 262-266): instead of drain-then-stop, write the upstream
-  with the old color as `backup`, then schedule the retirement:
-
-  ```bash
-  systemd-run --unit="${STANDBY_UNIT}" --on-active="${STANDBY_SEC}" \
-    "${STANDBY_END_SCRIPT}"
-  ```
-
-  Do not block the deploy for `STANDBY_SEC` — a 300s standby would stall the CI
-  pipeline for its full duration.
-
-### Step 5 — `phoenix_rollback.sh.j2`
-
-- [ ] Cancel a pending standby timer at the start of rollback
-
-Rollback runs *because* the live color is bad, so keeping a known-bad release as
-the failover target is wrong. It should keep writing a single-server upstream —
-that logic is already correct. The only change needed is cancelling a pending
-standby timer at the start, so it cannot fire mid-rollback.
-
-### Step 6 — tests and docs
-
-- [ ] New `tests/ansible_blue_green_failover_contract_test.sh`, following the
-      grep-based style of `tests/ansible_uploads_contract_test.sh`. Assert: the
-      map is present and maps `''` to empty rather than `close`;
-      `proxy_next_upstream` excludes `http_503`; `deploy_standby_sec` defaults
-      to `0`; the standby-end script drops the backup before stopping; deploy
-      cancels the timer before restaging.
-- [ ] Wire it into `.gitlab-ci.yml` `template_smoke` — both the `bash -n` list
-      on lines 33-34 and the execution list on lines 35-40
-- [ ] Wire the **existing** `tests/ansible_uploads_contract_test.sh` into CI
-      too; it is currently not run despite the README telling consumers to run
-      it
-- [ ] README: document `deploy_standby_sec` near the uploads-contract
-      paragraph (lines 37-43), leading with the duplicate-background-work
-      constraint rather than the failover benefit
-- [ ] README: state the residual limitations from section 5
-- [ ] Bump `VERSION` (0.6.22 → 0.7.0; the vhost template change affects every
-      consumer on re-provision) and update the `ref:` examples in the README
-
-### Verification before release
-
-- [ ] Both instances answer independently during the standby window
-- [ ] Killing the live color mid-standby fails over to the standby
-- [ ] `nginx -t` passes with two apps on one box (checks the per-site map
-      variable name)
-
-Ansible templates are not exercised by CI beyond grep assertions, so verify on a
-real host:
-
-```bash
-# Both instances answer independently during the standby window
-curl -f http://127.0.0.1:4000/health
-curl -f http://127.0.0.1:4001/health
-
-# Observe the interruption while hitting the live color
-while true; do
-  curl -sS -o /dev/null -w '%{http_code} %{time_total}\n' https://app.example.com/health
-  sleep 0.25
-done
-
-# In another terminal, kill the live color mid-standby
-sudo systemctl stop myapp@blue
+```yaml
+deploy_public_base_url: "https://{{ server_name }}"
+deploy_public_identity_path: "{{ deploy_health_path }}"
+deploy_public_smoke_path: "/"
+deploy_public_smoke_content_type: "text/html"
+deploy_public_smoke_timeout_sec: 15
 ```
 
-Expect a small number of failed requests, then 200s served by the standby.
-Confirm `nginx -t` passes with two apps on one box (the per-site map variable
-name is the thing being checked).
+Tasks:
 
-## 5. Residual limitations
+- [x] Keep the existing direct loopback health and artifact-identity check
+      before cutover. Treat configured `deploy_health_path` as the consumer's
+      readiness-and-identity endpoint; do not assume a literal route name.
+- [x] Write the candidate as primary and the current color as backup, validate
+      and reload NGINX, but do not update `current_color` yet.
+- [x] Through the public HTTPS URL, require:
+      1. health JSON identifying the candidate version, release, pipeline, and
+         color; and
+      2. a 2xx response with an HTML content type from the smoke path.
+- [x] If either public check fails, restore the unchanged current color as the
+      sole upstream, reload NGINX, stop the candidate, and exit non-zero.
+- [x] If both checks pass, update `current_color`, record the deployment,
+      schedule standby retirement, and report success.
+- [x] Require a public base URL and smoke path for production deployment. Do
+      not silently reduce verification to the configured readiness route;
+      consumers whose `/` does not return 2xx HTML must select a representative
+      path.
+- [x] Keep the failed candidate release for diagnosis and the next forward
+      deploy; do not undo its migrations.
 
-Unchanged by this plan, and worth stating in the README so nobody assumes
-otherwise:
+The public smoke belongs in the host deploy transaction. The existing
+`staging_release_smoke` CI job remains useful as an independent external check,
+but it runs too late to define whether the host commits its color switch.
 
-* Established WebSocket/LiveView connections drop on failover and must reconnect.
-* There are no active health checks; detection is passive and costs the request
-  that discovers the failure.
-* Nothing here survives the box itself failing.
-* Outside the standby window, behavior is exactly as today — a single-server
-  upstream with no failover target.
+### 4. Test, document, and release
 
-[1]: https://nginx.org/en/docs/http/ngx_http_upstream_module.html "Module ngx_http_upstream_module"
-[2]: https://nginx.org/en/docs/http/ngx_http_upstream_hc_module.html "Module ngx_http_upstream_hc_module"
-[3]: https://nginx.org/en/docs/http/websocket.html "WebSocket proxying"
-[4]: https://hexdocs.pm/phoenix_live_view/deployments.html "Deployments and recovery — Phoenix LiveView"
-[5]: https://nginx.org/en/docs/http/ngx_http_proxy_module.html "Module ngx_http_proxy_module - nginx"
+Files:
+
+- new `tests/ansible_blue_green_failover_contract_test.sh`
+- `.gitlab-ci.yml`
+- `README.md`
+- `VERSION`
+
+Tasks:
+
+- [x] Add contract tests for NGINX mapping and retry policy, standby defaults,
+      timer cancellation, safe standby retirement, transactional
+      `current_color`, public identity verification, HTML smoke verification,
+      and failed-cutover restoration.
+- [x] Add a fixture test where loopback readiness succeeds but the public page
+      returns 500. Use a configurable route name and assert that the old color
+      remains committed and the deploy fails.
+- [x] Run the new contract test and the existing
+      `tests/ansible_uploads_contract_test.sh` in `template_smoke`.
+- [x] Document the consumer/harness boundary,
+      liveness/readiness/synthetic-smoke contract, opt-in safety gate,
+      recommended 300-second window, and residual limitations.
+- [x] Bump `VERSION` from `0.6.22` to `0.7.0` and update README include refs.
+
+## Verification before release
+
+- [ ] Run the repository test suite.
+- [ ] Provision a host with two applications and pass `nginx -t`.
+- [ ] Deploy a fixture whose readiness check passes but public page returns
+      500; confirm traffic and `current_color` remain on the previous release.
+- [ ] Deploy a healthy fixture; confirm both colors answer independently during
+      the standby window.
+- [ ] Stop the live service mid-window while repeatedly requesting the public
+      URL; confirm new requests reach the previous color.
+- [ ] Confirm the standby timer removes the backup before stopping its service.
+- [ ] Start another deploy during the standby window; confirm the stale timer
+      cannot affect the new live color.
+- [ ] Confirm CI and host notifications distinguish a rejected candidate from
+      a successful cutover.
+- [ ] Confirm the NGINX error log records a stopped primary and sampled response
+      identity proves that the standby served the subsequent requests.
+
+## Residual limitations
+
+- Both Phoenix instances, NGINX, PostgreSQL, and local uploads remain on one
+  host. Host, disk, network, NGINX, and database failures are not covered.
+- Open-source NGINX performs passive checks. The first request can observe the
+  live process failure, and later real requests probe it again after
+  `fail_timeout`.
+- HTTP application errors after deployment do not trigger runtime NGINX
+  failover. They require monitoring and a forward fix.
+- Established WebSocket and LiveView connections disconnect and reconnect;
+  process-local state may be lost.
+- Two releases share one database and may both run scheduled work during the
+  standby window.
+- Runtime failover is recorded in NGINX logs but does not send a proactive alert
+  in this increment.
+- Outside the configured window there is no standby.
+
+References:
+
+- [Kubernetes probe semantics][1] provide the liveness/readiness terminology;
+  this implementation uses systemd and NGINX, not Kubernetes.
+- [NGINX open-source load balancing][2] documents passive health checks,
+  `max_fails`, `fail_timeout`, and backup upstreams.
+- [NGINX WebSocket proxying][3] documents the required upgrade handling.
+- [Phoenix LiveView deployment guidance][4] describes reconnect and recovery.
+- [NGINX proxy retry rules][5] define retry conditions and non-idempotent
+  behavior.
+
+[1]: https://kubernetes.io/docs/concepts/workloads/pods/probes/
+[2]: https://nginx.org/en/docs/http/load_balancing.html
+[3]: https://nginx.org/en/docs/http/websocket.html
+[4]: https://hexdocs.pm/phoenix_live_view/deployments.html
+[5]: https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_next_upstream

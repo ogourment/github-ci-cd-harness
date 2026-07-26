@@ -52,10 +52,10 @@ Include this repository in consuming pipelines:
 ```yaml
   include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.21
+    ref: v0.7.0
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.6.21
+    ref: v0.7.0
     file: /templates/cd.yml
 ```
 
@@ -203,6 +203,43 @@ phoenix_pipeline_id_env_var: "MY_APP_CI_PIPELINE_ID"
 Both `/health` and any application-specific `/health/deep` endpoint should
 extend the same health payload so either endpoint reports identical deployment
 identity.
+
+### Bounded same-host failover
+
+The Ansible roles can keep the previous blue/green color as an NGINX backup for
+a short post-deploy window. This is release resilience on one host, not
+host-level HA: NGINX, PostgreSQL, storage, and both application processes still
+share the same machine.
+
+The feature is off by default. A consumer may start with:
+
+```yaml
+deploy_standby_sec: 300
+deploy_health_path: "/health/deep"
+deploy_public_smoke_path: "/"
+```
+
+Enable it only after confirming that migrations remain backward-compatible
+and that two release instances cannot duplicate unsafe scheduled, singleton,
+or background work. The consumer supplies and tests the configured readiness
+endpoint. It must return 2xx JSON only when required application dependencies
+are available and include `version`, `release_id`, `pipeline_id`, and `color`.
+The consumer also selects an unauthenticated HTML path that exercises real
+production rendering.
+
+The host deploy first validates readiness and identity directly on the
+candidate port. It then makes the candidate primary with the current color as
+backup, validates the same identity and an HTML smoke request through public
+HTTPS, and only then commits `current_color`. A failed public check restores
+the previous color as the sole upstream and stops the candidate. The deploy
+fails for a forward fix; migrations and releases are not rolled back
+automatically.
+
+NGINX retries connection, timeout, and invalid-header failures on the backup.
+It deliberately does not retry generic HTTP 5xx responses or non-idempotent
+requests. The first failed request may therefore still fail, established
+WebSocket connections must reconnect, and there is no standby after the
+configured window.
 
 Use `STAGING_HOST` / `PROD_HOST` for public environment hostnames used by
 health and websocket checks. Set `STAGING_SSH_HOST` / `PROD_SSH_HOST` only when

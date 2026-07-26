@@ -1,3 +1,8 @@
+map $http_upgrade ${{ nginx_connection_upgrade_var }} {
+    default upgrade;
+    ''      '';
+}
+
 server {
     listen 80;
     server_name {{ server_name }}{% for alias in server_aliases %} {{ alias }}{% endfor %};
@@ -26,7 +31,12 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection ${{ nginx_connection_upgrade_var }};
+        proxy_connect_timeout {{ nginx_proxy_connect_timeout }};
+        proxy_read_timeout {{ nginx_proxy_read_timeout }};
+        proxy_send_timeout {{ nginx_proxy_send_timeout }};
+        proxy_next_upstream {{ nginx_proxy_next_upstream }};
+        proxy_next_upstream_tries {{ nginx_proxy_next_upstream_tries }};
     }
     {% endif %}
 }
@@ -133,7 +143,12 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection ${{ nginx_connection_upgrade_var }};
+        proxy_connect_timeout {{ nginx_proxy_connect_timeout }};
+        proxy_read_timeout {{ nginx_proxy_read_timeout }};
+        proxy_send_timeout {{ nginx_proxy_send_timeout }};
+        proxy_next_upstream {{ nginx_proxy_next_upstream }};
+        proxy_next_upstream_tries {{ nginx_proxy_next_upstream_tries }};
     }
 }
 {% endif %}

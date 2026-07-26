@@ -22,6 +22,12 @@ PORT_GREEN="{{ app_port_green }}"
 
 HEALTH_PATH="{{ deploy_health_path }}"
 HEALTH_TIMEOUT_SEC={{ deploy_health_timeout_sec }}
+STANDBY_UNIT="{{ app_name }}-standby-end"
+
+cancel_standby_timer() {
+  systemctl stop "${STANDBY_UNIT}.timer" "${STANDBY_UNIT}.service" 2>/dev/null || true
+  systemctl reset-failed "${STANDBY_UNIT}.timer" "${STANDBY_UNIT}.service" 2>/dev/null || true
+}
 
 CURRENT_COLOR="$(cat "${CURRENT_COLOR_FILE}" 2>/dev/null || echo blue)"
 case "${CURRENT_COLOR}" in
@@ -41,6 +47,7 @@ if [[ ! -x "${TARGET_BIN}" ]]; then
   exit 1
 fi
 
+cancel_standby_timer
 echo "==> Rolling back: ${CURRENT_COLOR} → ${TARGET_COLOR} (port ${TARGET_PORT})"
 systemctl restart "${TARGET_SERVICE}"
 

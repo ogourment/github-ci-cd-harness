@@ -1,5 +1,5 @@
 ---
-# Two-instance zero-downtime blue/green for a Phoenix release host (v0.4.0).
+# Two-instance zero-downtime blue/green for a Phoenix release host.
 # Sensible defaults; the consumer (inventory/group_vars) must still set the
 # app identity + secrets (app_name, otp_app_name, secret_key_base, db_*, ...).
 
@@ -15,6 +15,7 @@ app_current_color_file: "{{ app_root }}/current_color"
 deploy_releases_root: "/home/{{ deploy_user }}/releases"
 deploy_script_path: "/usr/local/bin/{{ app_name }}_deploy"
 deploy_rollback_script_path: "/usr/local/bin/{{ app_name }}_rollback"
+deploy_standby_end_script: "/usr/local/bin/{{ app_name }}_standby_end"
 telegram_notify_script: "/usr/local/bin/{{ app_name }}_telegram_notify"
 
 # systemd template unit base name ({{ app_name }}@blue / @green).
@@ -24,14 +25,25 @@ app_service_name: "{{ app_name }}"
 deploy_health_path: "/health"
 deploy_health_timeout_sec: 60
 deploy_drain_sec: 5
+# Opt in only after confirming that the previous release remains compatible
+# with the migrated schema and cannot duplicate unsafe scheduled/background
+# work while both colors run.
+deploy_standby_sec: 0
+deploy_public_base_url: "https://{{ server_name }}"
+deploy_public_identity_path: "{{ deploy_health_path }}"
+deploy_public_smoke_path: "/"
+deploy_public_smoke_content_type: "text/html"
+deploy_public_smoke_timeout_sec: 15
 
 # nginx upstream include the deploy script rewrites to flip colors.
 nginx_upstream_name: "{{ app_name }}_upstream"
 nginx_upstream_include: "/etc/nginx/conf.d/{{ app_name }}_upstream.conf"
+nginx_upstream_max_fails: 1
+nginx_upstream_fail_timeout: "5s"
 
 # App-facing env var names for the deploy env + live color, so the app can
 # surface them (e.g. in /health, which the deploy health-check reads). Keep the
-# defaults unless the app already reads a specific name (ecojeux: ECOJEUX_*).
+# defaults unless the app already reads app-prefixed names.
 phoenix_env_indicator_var: "DEPLOY_ENV"
 phoenix_color_env_var: "DEPLOY_COLOR"
 # Written into the target slot immediately before it starts, so the deployed

@@ -54,6 +54,14 @@
     group: root
     mode: "0755"
 
+- name: Install standby retirement script
+  ansible.builtin.template:
+    src: phoenix_standby_end.sh.j2
+    dest: "{{ deploy_standby_end_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Install Telegram notify script
   ansible.builtin.template:
     src: phoenix_telegram_notify.sh.j2

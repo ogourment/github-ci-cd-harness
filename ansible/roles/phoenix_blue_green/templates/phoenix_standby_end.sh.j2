@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+#
+# Retire the non-live blue/green color after a bounded standby window.
+# Managed by Ansible at {{ deploy_standby_end_script }} — do not edit by hand.
+#
+set -euo pipefail
+
+SERVICE_BASE="{{ app_name }}"
+CURRENT_COLOR_FILE="{{ app_current_color_file }}"
+NGINX_UPSTREAM_FILE="{{ nginx_upstream_include }}"
+NGINX_UPSTREAM_NAME="{{ nginx_upstream_name }}"
+
+PORT_BLUE="{{ app_port_blue }}"
+PORT_GREEN="{{ app_port_green }}"
+
+CURRENT_COLOR="$(cat "${CURRENT_COLOR_FILE}")"
+case "${CURRENT_COLOR}" in
+  blue)
+    LIVE_PORT="${PORT_BLUE}"
+    STANDBY_COLOR="green"
+    ;;
+  green)
+    LIVE_PORT="${PORT_GREEN}"
+    STANDBY_COLOR="blue"
+    ;;
+  *)
+    echo "ERROR: invalid current_color '${CURRENT_COLOR}'" >&2
+    exit 1
+    ;;
+esac
+
+STANDBY_SERVICE="${SERVICE_BASE}@${STANDBY_COLOR}.service"
+
+write_live_only_upstream() {
+  local candidate previous
+  candidate="$(mktemp)"
+  previous="$(mktemp)"
+
+  cat > "${candidate}" <<EOF
+upstream ${NGINX_UPSTREAM_NAME} {
+    server 127.0.0.1:${LIVE_PORT};
+}
+EOF
+
+  chmod 0644 "${candidate}"
+  cp "${NGINX_UPSTREAM_FILE}" "${previous}"
+  mv "${candidate}" "${NGINX_UPSTREAM_FILE}"
+
+  if ! nginx -t; then
+    cp "${previous}" "${NGINX_UPSTREAM_FILE}"
+    rm -f "${previous}"
+    echo "ERROR: refusing to stop ${STANDBY_SERVICE}; live-only nginx configuration is invalid" >&2
+    exit 1
+  fi
+
+  rm -f "${previous}"
+  nginx -s reload
+}
+
+write_live_only_upstream
+systemctl stop "${STANDBY_SERVICE}" || true
+echo "Standby retired: ${STANDBY_COLOR}; active=${CURRENT_COLOR}."

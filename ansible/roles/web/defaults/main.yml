@@ -12,6 +12,16 @@ nginx_legacy_site_names: []
 nginx_legacy_upstream_includes: []
 nginx_drop_scanner_probes: true
 
+# Proxy behavior shared by ordinary HTTP and WebSocket requests. The map
+# variable must be unique because every enabled site is included in nginx's
+# global http context.
+nginx_connection_upgrade_var: "{{ app_name | replace('-', '_') }}_connection_upgrade"
+nginx_proxy_next_upstream: "error timeout invalid_header"
+nginx_proxy_next_upstream_tries: 2
+nginx_proxy_connect_timeout: "2s"
+nginx_proxy_read_timeout: "75s"
+nginx_proxy_send_timeout: "75s"
+
 # Optional persistent static uploads served directly by nginx. Set both values
 # together; the URL prefix starts with a slash and omits the trailing slash.
 nginx_uploads_dir: ""
