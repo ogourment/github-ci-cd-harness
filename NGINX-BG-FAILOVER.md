@@ -1,6 +1,6 @@
 # Plan: bounded same-host failover for blue/green Phoenix
 
-Status: **implementation in progress.**
+Status: **implemented; live failover validation remaining.**
 
 ## Goal
 
@@ -267,8 +267,8 @@ Tasks:
 
 ## Verification before release
 
-- [ ] Run the repository test suite.
-- [ ] Provision a host with two applications and pass `nginx -t`.
+- [x] Run the repository test suite.
+- [x] Provision a host with two applications and pass `nginx -t`.
 - [ ] Deploy a fixture whose readiness check passes but public page returns
       500; confirm traffic and `current_color` remain on the previous release.
 - [ ] Deploy a healthy fixture; confirm both colors answer independently during
