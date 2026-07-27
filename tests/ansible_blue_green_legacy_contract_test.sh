@@ -10,6 +10,7 @@ service="${role}/templates/phoenix@.service.j2"
 notify="${role}/templates/phoenix_telegram_notify.sh.j2"
 standby="${role}/templates/phoenix_standby_end.sh.j2"
 rollback="${role}/templates/phoenix_rollback.sh.j2"
+environment="${role}/templates/phoenix.env.j2"
 
 for expected in \
   'deploy_release_artifact_kind: "directory"' \
@@ -21,6 +22,8 @@ for expected in \
   'app_service_exec_start:' \
   'app_service_on_failure: ""' \
   'nginx_upstream_keepalive: 0' \
+  'phoenix_release_node_env_var: "RELEASE_NODE"' \
+  'phoenix_release_node_template: "{{ otp_app_name }}_%s"' \
   'deployment_history_path: ""'; do
   grep -Fq "${expected}" "${defaults}"
 done
@@ -29,6 +32,8 @@ grep -Fq "deploy_release_artifact_kind in ['directory', 'archive']" "${tasks}"
 grep -Fq "deploy_slot_layout in ['symlink', 'directory']" "${tasks}"
 grep -Fq "app_slot_env_file_template is search('%s')" "${tasks}"
 grep -Fq 'nginx_upstream_keepalive | int >= 0' "${tasks}"
+grep -Fq "phoenix_release_node_env_var is match('^[A-Z][A-Z0-9_]*$')" "${tasks}"
+grep -Fq "phoenix_release_node_template is search('%s')" "${tasks}"
 grep -Fq "app_slot_env_file_template | replace('%s', item.color)" "${tasks}"
 grep -Fq 'keepalive {{ nginx_upstream_keepalive }};' "${tasks}"
 
@@ -59,5 +64,6 @@ grep -Fq 'chmod 0640 "${HISTORY_PATH}"' "${deploy}"
 grep -Fq 'keepalive {{ nginx_upstream_keepalive }};' "${deploy}"
 grep -Fq 'keepalive {{ nginx_upstream_keepalive }};' "${standby}"
 grep -Fq 'keepalive {{ nginx_upstream_keepalive }};' "${rollback}"
+grep -Fq "{{ phoenix_release_node_env_var }}=\"{{ phoenix_release_node_template | replace('%s', slot_color) }}\"" "${environment}"
 
 printf 'ansible blue/green legacy contract: ok\n'

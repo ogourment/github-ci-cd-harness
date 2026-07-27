@@ -269,7 +269,8 @@ Tasks:
 - [x] Release the initial behavior in `0.7.0`, the exact-release retry fix in
       `0.7.1`, existing-host compatibility settings in `0.7.2`, and custom
       slot-env notifier support in `0.7.3`. Existing upstream keepalive
-      preservation followed in `0.7.4`.
+      preservation followed in `0.7.4`; per-color Erlang release-node identity
+      followed in `0.7.5`.
 
 ## Verification before release
 

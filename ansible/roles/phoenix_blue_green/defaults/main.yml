@@ -61,6 +61,8 @@ phoenix_color_env_var: "DEPLOY_COLOR"
 # health endpoint can prove which immutable release served the response.
 phoenix_release_id_env_var: "DEPLOY_RELEASE_ID"
 phoenix_pipeline_id_env_var: "DEPLOY_CI_PIPELINE_ID"
+phoenix_release_node_env_var: "RELEASE_NODE"
+phoenix_release_node_template: "{{ otp_app_name }}_%s"
 deploy_env: "production"
 
 # Extra, app-specific env lines appended verbatim to each color's env file

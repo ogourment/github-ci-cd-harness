@@ -16,6 +16,8 @@
       - deploy_slot_layout in ['symlink', 'directory']
       - app_slot_env_file_template is search('%s')
       - nginx_upstream_keepalive | int >= 0
+      - phoenix_release_node_env_var is match('^[A-Z][A-Z0-9_]*$')
+      - phoenix_release_node_template is search('%s')
     quiet: true
 
 - name: Ensure app root exists

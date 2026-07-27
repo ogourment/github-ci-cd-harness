@@ -52,10 +52,10 @@ Include this repository in consuming pipelines:
 ```yaml
   include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.7.4
+    ref: v0.7.5
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.7.4
+    ref: v0.7.5
     file: /templates/cd.yml
 ```
 
@@ -234,12 +234,14 @@ app_service_exec_start: "/opt/my_app/slots/%i/bin/server"
 release_seed_after_migrate: false
 deployment_history_path: "/var/lib/my_app/deployments.jsonl"
 nginx_upstream_keepalive: 32
+phoenix_release_node_template: "my_app_%s"
 ```
 
 The defaults remain the harness-native directory artifact, symlink slots,
 underscore-named slot env file, OTP release start command, post-migration seed
-hook, and no host JSON history. Set `app_service_on_failure` when an existing
-unit has an alert target that must be retained.
+hook, per-color `RELEASE_NODE`, and no host JSON history. Set
+`app_service_on_failure` when an existing unit has an alert target that must be
+retained.
 
 Enable it only after confirming that migrations remain backward-compatible
 and that two release instances cannot duplicate unsafe scheduled, singleton,
