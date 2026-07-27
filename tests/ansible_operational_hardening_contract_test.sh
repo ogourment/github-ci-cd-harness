@@ -107,6 +107,13 @@ else
 fi
 EOF
 chmod +x "${fixture}/curl"
+cat > "${fixture}/jq" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+input="${@: -1}"
+sed -n 's/.*"color"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${input}"
+EOF
+chmod +x "${fixture}/jq"
 
 PATH="${fixture}:${PATH}"
 CURRENT_PORT=4210
