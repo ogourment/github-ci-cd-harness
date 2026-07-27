@@ -50,6 +50,7 @@ nginx_upstream_name: "{{ app_name }}_upstream"
 nginx_upstream_include: "/etc/nginx/conf.d/{{ app_name }}_upstream.conf"
 nginx_upstream_max_fails: 1
 nginx_upstream_fail_timeout: "5s"
+nginx_upstream_keepalive: 0
 
 # App-facing env var names for the deploy env + live color, so the app can
 # surface them (e.g. in /health, which the deploy health-check reads). Keep the

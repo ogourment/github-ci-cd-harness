@@ -52,10 +52,10 @@ Include this repository in consuming pipelines:
 ```yaml
   include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.7.3
+    ref: v0.7.4
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.7.3
+    ref: v0.7.4
     file: /templates/cd.yml
 ```
 
@@ -233,6 +233,7 @@ app_service_environment_files:
 app_service_exec_start: "/opt/my_app/slots/%i/bin/server"
 release_seed_after_migrate: false
 deployment_history_path: "/var/lib/my_app/deployments.jsonl"
+nginx_upstream_keepalive: 32
 ```
 
 The defaults remain the harness-native directory artifact, symlink slots,

@@ -186,6 +186,9 @@ write_upstream() {
     else
       printf '    server 127.0.0.1:%s;\n' "${live_port}"
     fi
+{% if nginx_upstream_keepalive | int > 0 %}
+    printf '    keepalive {{ nginx_upstream_keepalive }};\n'
+{% endif %}
     printf '}\n'
   } > "${candidate}"
   chmod 0644 "${candidate}"

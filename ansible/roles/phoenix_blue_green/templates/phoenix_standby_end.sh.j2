@@ -39,6 +39,9 @@ write_live_only_upstream() {
   cat > "${candidate}" <<EOF
 upstream ${NGINX_UPSTREAM_NAME} {
     server 127.0.0.1:${LIVE_PORT};
+{% if nginx_upstream_keepalive | int > 0 %}
+    keepalive {{ nginx_upstream_keepalive }};
+{% endif %}
 }
 EOF
 

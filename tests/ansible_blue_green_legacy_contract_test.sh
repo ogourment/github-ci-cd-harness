@@ -8,6 +8,8 @@ tasks="${role}/tasks/main.yml"
 deploy="${role}/templates/phoenix_deploy.sh.j2"
 service="${role}/templates/phoenix@.service.j2"
 notify="${role}/templates/phoenix_telegram_notify.sh.j2"
+standby="${role}/templates/phoenix_standby_end.sh.j2"
+rollback="${role}/templates/phoenix_rollback.sh.j2"
 
 for expected in \
   'deploy_release_artifact_kind: "directory"' \
@@ -18,6 +20,7 @@ for expected in \
   'app_service_environment_files:' \
   'app_service_exec_start:' \
   'app_service_on_failure: ""' \
+  'nginx_upstream_keepalive: 0' \
   'deployment_history_path: ""'; do
   grep -Fq "${expected}" "${defaults}"
 done
@@ -25,7 +28,9 @@ done
 grep -Fq "deploy_release_artifact_kind in ['directory', 'archive']" "${tasks}"
 grep -Fq "deploy_slot_layout in ['symlink', 'directory']" "${tasks}"
 grep -Fq "app_slot_env_file_template is search('%s')" "${tasks}"
+grep -Fq 'nginx_upstream_keepalive | int >= 0' "${tasks}"
 grep -Fq "app_slot_env_file_template | replace('%s', item.color)" "${tasks}"
+grep -Fq 'keepalive {{ nginx_upstream_keepalive }};' "${tasks}"
 
 grep -Fq '{% for environment_file in app_service_environment_files %}' "${service}"
 grep -Fq 'EnvironmentFile={{ environment_file }}' "${service}"
@@ -51,5 +56,8 @@ grep -Fq 'git_messages: ($git_messages | split("\n")' "${deploy}"
 grep -Fq 'slot: $slot' "${deploy}"
 grep -Fq 'chown "${DEPLOY_USER}:${DEPLOY_USER}" "${HISTORY_PATH}"' "${deploy}"
 grep -Fq 'chmod 0640 "${HISTORY_PATH}"' "${deploy}"
+grep -Fq 'keepalive {{ nginx_upstream_keepalive }};' "${deploy}"
+grep -Fq 'keepalive {{ nginx_upstream_keepalive }};' "${standby}"
+grep -Fq 'keepalive {{ nginx_upstream_keepalive }};' "${rollback}"
 
 printf 'ansible blue/green legacy contract: ok\n'

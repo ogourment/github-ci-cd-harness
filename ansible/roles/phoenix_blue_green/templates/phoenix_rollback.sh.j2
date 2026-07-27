@@ -67,6 +67,9 @@ tmp="$(mktemp)"
 cat > "${tmp}" <<EOF
 upstream ${NGINX_UPSTREAM_NAME} {
     server 127.0.0.1:${TARGET_PORT};
+{% if nginx_upstream_keepalive | int > 0 %}
+    keepalive {{ nginx_upstream_keepalive }};
+{% endif %}
 }
 EOF
 mv "${tmp}" "${NGINX_UPSTREAM_FILE}"

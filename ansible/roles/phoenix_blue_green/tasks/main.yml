@@ -15,6 +15,7 @@
       - deploy_release_artifact_kind in ['directory', 'archive']
       - deploy_slot_layout in ['symlink', 'directory']
       - app_slot_env_file_template is search('%s')
+      - nginx_upstream_keepalive | int >= 0
     quiet: true
 
 - name: Ensure app root exists
@@ -103,6 +104,9 @@
     content: |
       upstream {{ nginx_upstream_name }} {
           server 127.0.0.1:{{ app_port_blue }};
+      {% if nginx_upstream_keepalive | int > 0 %}
+          keepalive {{ nginx_upstream_keepalive }};
+      {% endif %}
       }
     force: false
     owner: root
