@@ -24,6 +24,7 @@ NGINX_UPSTREAM_NAME="{{ nginx_upstream_name }}"
 CURRENT_COLOR_FILE="{{ app_current_color_file }}"
 ENV_FILE_BASE="{{ app_env_file }}"
 SLOT_ENV_FILE_TEMPLATE="{{ app_slot_env_file_template }}"
+SLOT_METADATA_ENV_FILE_TEMPLATE="{{ app_slot_metadata_env_file_template }}"
 RELEASE_ID_ENV_VAR="{{ phoenix_release_id_env_var }}"
 PIPELINE_ID_ENV_VAR="{{ phoenix_pipeline_id_env_var }}"
 ARTIFACT_KIND="{{ deploy_release_artifact_kind }}"
@@ -40,6 +41,7 @@ DRAIN_SEC={{ deploy_drain_sec }}
 STANDBY_SEC={{ deploy_standby_sec }}
 STANDBY_END_SCRIPT="{{ deploy_standby_end_script }}"
 STANDBY_UNIT="{{ app_name }}-standby-end"
+OPERATION_LOCK_PATH="{{ deploy_operation_lock_path }}"
 
 UPSTREAM_MAX_FAILS={{ nginx_upstream_max_fails }}
 UPSTREAM_FAIL_TIMEOUT="{{ nginx_upstream_fail_timeout }}"
@@ -49,6 +51,10 @@ PUBLIC_IDENTITY_PATH="{{ deploy_public_identity_path }}"
 PUBLIC_SMOKE_PATH="{{ deploy_public_smoke_path }}"
 PUBLIC_SMOKE_CONTENT_TYPE="{{ deploy_public_smoke_content_type }}"
 PUBLIC_SMOKE_TIMEOUT_SEC={{ deploy_public_smoke_timeout_sec }}
+
+mkdir -p "$(dirname "${OPERATION_LOCK_PATH}")"
+exec 9>"${OPERATION_LOCK_PATH}"
+flock 9
 
 case "${ARTIFACT_KIND}" in
   directory)
@@ -72,6 +78,15 @@ esac
 slot_env_file() {
   local color="$1"
   printf '%s\n' "${SLOT_ENV_FILE_TEMPLATE/\%s/${color}}"
+}
+
+slot_metadata_env_file() {
+  local color="$1"
+  if [[ -n "${SLOT_METADATA_ENV_FILE_TEMPLATE}" ]]; then
+    printf '%s\n' "${SLOT_METADATA_ENV_FILE_TEMPLATE/\%s/${color}}"
+  else
+    slot_env_file "${color}"
+  fi
 }
 
 # --- Deploy notifications (best-effort; never break the deploy) --------------
@@ -359,7 +374,7 @@ if [[ "${STANDBY_SEC}" -gt 0 && -f "${CURRENT_COLOR_FILE}" ]]; then
     echo "ERROR: current ${CURRENT_COLOR} service is not active; restore service or run rollback before deploying" >&2
     exit 1
   fi
-  "${STANDBY_END_SCRIPT}"
+  PHOENIX_OPERATION_LOCK_HELD=1 "${STANDBY_END_SCRIPT}"
 fi
 
 echo "==> Staging release..."
@@ -412,8 +427,9 @@ fi
 # deploy process. Keep the release identifier alongside the static slot
 # metadata before starting the target so readiness can attest the cutover.
 TARGET_ENV_FILE="$(slot_env_file "${TARGET_COLOR}")"
+TARGET_METADATA_ENV_FILE="$(slot_metadata_env_file "${TARGET_COLOR}")"
 tmp_env="$(mktemp)"
-grep -Ev "^(${RELEASE_ID_ENV_VAR}|${PIPELINE_ID_ENV_VAR}|${GIT_SHA_ENV_VAR}|${GIT_REF_ENV_VAR}|${GIT_SUBJECT_ENV_VAR}|${GIT_MESSAGES_ENV_VAR}|${PIPELINE_URL_ENV_VAR}|${DEPLOYED_AT_ENV_VAR})=" "${TARGET_ENV_FILE}" > "${tmp_env}" || true
+grep -Ev "^(${RELEASE_ID_ENV_VAR}|${PIPELINE_ID_ENV_VAR}|${GIT_SHA_ENV_VAR}|${GIT_REF_ENV_VAR}|${GIT_SUBJECT_ENV_VAR}|${GIT_MESSAGES_ENV_VAR}|${PIPELINE_URL_ENV_VAR}|${DEPLOYED_AT_ENV_VAR})=" "${TARGET_METADATA_ENV_FILE}" > "${tmp_env}" || true
 append_runtime_env "${RELEASE_ID_ENV_VAR}" "${RELEASE_ID}" "${tmp_env}"
 append_runtime_env "${PIPELINE_ID_ENV_VAR}" "${CI_PIPELINE_ID}" "${tmp_env}"
 append_runtime_env "${GIT_SHA_ENV_VAR}" "${GIT_SHA}" "${tmp_env}"
@@ -424,13 +440,16 @@ append_runtime_env "${PIPELINE_URL_ENV_VAR}" "${CI_PIPELINE_URL}" "${tmp_env}"
 append_runtime_env "${DEPLOYED_AT_ENV_VAR}" "${DEPLOYED_AT}" "${tmp_env}"
 chown "{{ deploy_user }}:{{ deploy_user }}" "${tmp_env}"
 chmod 600 "${tmp_env}"
-mv "${tmp_env}" "${TARGET_ENV_FILE}"
+mv "${tmp_env}" "${TARGET_METADATA_ENV_FILE}"
 
 if [[ "${RUN_MIGRATIONS}" == "migrate" ]]; then
   echo "==> Running migrations (must be backward-compatible with ${CURRENT_COLOR})..."
   sudo -u "${DEPLOY_USER}" bash -lc "
     set -euo pipefail
-    set -a; [[ -f '${TARGET_ENV_FILE}' ]] && source '${TARGET_ENV_FILE}'; set +a
+    set -a
+    [[ -f '${TARGET_ENV_FILE}' ]] && source '${TARGET_ENV_FILE}'
+    [[ -f '${TARGET_METADATA_ENV_FILE}' ]] && source '${TARGET_METADATA_ENV_FILE}'
+    set +a
     cd '${RELEASE_DIR}'
     MIX_ENV=prod 'bin/${OTP_APP}' eval '${MIGRATE_MODULE}.migrate()'
   "
@@ -438,7 +457,10 @@ if [[ "${RUN_MIGRATIONS}" == "migrate" ]]; then
   echo "==> Running release seeds..."
   sudo -u "${DEPLOY_USER}" bash -lc "
     set -euo pipefail
-    set -a; [[ -f '${TARGET_ENV_FILE}' ]] && source '${TARGET_ENV_FILE}'; set +a
+    set -a
+    [[ -f '${TARGET_ENV_FILE}' ]] && source '${TARGET_ENV_FILE}'
+    [[ -f '${TARGET_METADATA_ENV_FILE}' ]] && source '${TARGET_METADATA_ENV_FILE}'
+    set +a
     cd '${RELEASE_DIR}'
     MIX_ENV=prod 'bin/${OTP_APP}' eval '${MIGRATE_MODULE}.seed()'
   "
@@ -501,7 +523,10 @@ sudo -u "${DEPLOY_USER}" env \
   CI_PIPELINE_URL="${CI_PIPELINE_URL}" \
   bash -lc "
   set -euo pipefail
-  set -a; [[ -f '${TARGET_ENV_FILE}' ]] && source '${TARGET_ENV_FILE}'; set +a
+  set -a
+  [[ -f '${TARGET_ENV_FILE}' ]] && source '${TARGET_ENV_FILE}'
+  [[ -f '${TARGET_METADATA_ENV_FILE}' ]] && source '${TARGET_METADATA_ENV_FILE}'
+  set +a
   cd '${RELEASE_DIR}'
   MIX_ENV=prod 'bin/${OTP_APP}' eval '${MIGRATE_MODULE}.record_deployment(\"${RELEASE_ID}\", \"${DEPLOY_ENV}\", \"${TARGET_COLOR}\", \"${EXPECTED_VERSION}\")'
 " || echo "WARNING: deployment timeline entry could not be recorded"
@@ -543,7 +568,7 @@ if [[ "${CURRENT_COLOR}" != "${TARGET_COLOR}" ]] && systemctl is-active --quiet 
       --property=Type=oneshot \
       "${STANDBY_END_SCRIPT}"; then
       echo "WARNING: standby timer could not be scheduled; retiring standby now" >&2
-      "${STANDBY_END_SCRIPT}"
+      PHOENIX_OPERATION_LOCK_HELD=1 "${STANDBY_END_SCRIPT}"
     fi
   else
     echo "==> Draining old ${CURRENT_COLOR} for ${DRAIN_SEC}s, then stopping..."

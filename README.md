@@ -217,6 +217,9 @@ The feature is off by default. A consumer may start with:
 deploy_standby_sec: 300
 deploy_health_path: "/health/deep"
 deploy_public_smoke_path: "/"
+app_health_watch_interval_sec: 15
+app_health_watch_failure_threshold: 2
+app_health_watch_action_cooldown_sec: 300
 ```
 
 Consumers migrating an existing blue/green host can preserve its release
@@ -227,9 +230,11 @@ deploy_release_artifact_kind: "archive"
 deploy_slot_layout: "directory"
 deploy_archive_strip_components: 1
 app_slot_env_file_template: "/etc/my_app/my_app-%s.env"
+app_slot_metadata_env_file_template: "/etc/my_app/my_app-%s-deploy.env"
 app_service_environment_files:
   - "/etc/my_app/my_app.env"
   - "/etc/my_app/my_app-%i.env"
+  - "/etc/my_app/my_app-%i-deploy.env"
 app_service_exec_start: "/opt/my_app/slots/%i/bin/server"
 release_seed_after_migrate: false
 deployment_history_path: "/var/lib/my_app/deployments.jsonl"
@@ -242,6 +247,13 @@ underscore-named slot env file, OTP release start command, post-migration seed
 hook, per-color `RELEASE_NODE`, and no host JSON history. Set
 `app_service_on_failure` when an existing unit has an alert target that must be
 retained.
+
+Use a separate `app_slot_metadata_env_file_template` when Ansible may refresh
+runtime credentials after deployments. The deploy helper writes release,
+pipeline, Git, actor, and deployment timestamps only to that metadata file, so
+rendering the static slot environment cannot erase the identity later reported
+by readiness and audit tools. List the metadata file after the static slot file
+in `app_service_environment_files`.
 
 Enable it only after confirming that migrations remain backward-compatible
 and that two release instances cannot duplicate unsafe scheduled, singleton,
@@ -259,11 +271,52 @@ the previous color as the sole upstream and stops the candidate. The deploy
 fails for a forward fix; migrations and releases are not rolled back
 automatically.
 
+When `app_health_watch_interval_sec` is positive, a systemd timer continuously
+checks the committed color's direct readiness endpoint and the configured
+public HTML smoke path. It requires `app_health_watch_failure_threshold`
+consecutive failures before acting. During the standby window it verifies the
+other color directly, atomically makes that color live-only in NGINX, updates
+the committed color, stops the unhealthy process, records the event, and rings
+an operator alert. Without a healthy standby it restarts the committed service
+and rings an alert. A cooldown prevents repeated recovery actions during a
+persistent outage.
+
+Deploy, rollback, standby retirement, and health-watch changes share
+`deploy_operation_lock_path`; they cannot concurrently rewrite NGINX or the
+committed-color pointer.
+
+Consumers can manage durable crash evidence and the `OnFailure` unit through:
+
+```yaml
+app_manage_failure_alert_unit: true
+app_service_on_failure: "my_app-alert@%i.service"
+app_failure_history_path: "/var/lib/my_app/failures.jsonl"
+app_failure_alert_cooldown_sec: 300
+telegram_verify_on_provision: true
+```
+
+Every systemd failure is written to the bounded JSONL ledger with its result,
+exit code or signal, restart count, timestamps, concise cause, and recent
+journal tail. Telegram delivery is rate-limited, but evidence capture is not.
+Alerts include the exact `journalctl` command for deeper investigation.
+
+The host Telegram wrapper validates Telegram's JSON response and returns
+non-zero for missing credentials, transport failures, non-2xx responses, and
+API-level rejection. `telegram_verify_on_provision` performs read-only `getMe`
+and `getChat` checks after slot environments are rendered. Deployment
+notifications remain best-effort so a notification outage cannot turn a
+healthy release into a failed deploy; delivery failure is nevertheless visible
+in CI or journald.
+
 NGINX retries connection, timeout, and invalid-header failures on the backup.
 It deliberately does not retry generic HTTP 5xx responses or non-idempotent
 requests. The first failed request may therefore still fail, established
 WebSocket connections must reconnect, and there is no standby after the
 configured window.
+
+The recurring monitor is what handles readiness HTTP errors and public-smoke
+HTTP 500 responses; NGINX itself still does not retry generic HTTP responses or
+non-idempotent requests.
 
 Use `STAGING_HOST` / `PROD_HOST` for public environment hostnames used by
 health and websocket checks. Set `STAGING_SSH_HOST` / `PROD_SSH_HOST` only when

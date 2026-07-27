@@ -1,0 +1,6 @@
+[Unit]
+Description={{ app_name }} failure capture and Telegram alert for %i
+
+[Service]
+Type=oneshot
+ExecStart={{ app_failure_alert_script }} %i

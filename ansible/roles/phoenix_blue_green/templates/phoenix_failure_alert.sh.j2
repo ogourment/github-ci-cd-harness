@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+#
+# Capture why a color failed before sending a rate-limited operator alert.
+# Managed by Ansible at {{ app_failure_alert_script }} — do not edit by hand.
+#
+set -euo pipefail
+
+COLOR="${1:?color required}"
+case "${COLOR}" in
+  blue|green) ;;
+  *) echo "Invalid color: ${COLOR}" >&2; exit 2 ;;
+esac
+
+APP="{{ app_name }}"
+DEPLOY_ENV="{{ deploy_env }}"
+DEPLOY_USER="{{ deploy_user }}"
+UNIT="${APP}@${COLOR}.service"
+NOTIFY_SCRIPT="{{ telegram_notify_script }}"
+HISTORY_PATH="{{ app_failure_history_path }}"
+COOLDOWN_SEC={{ app_failure_alert_cooldown_sec }}
+JOURNAL_LINES={{ app_failure_journal_lines }}
+HISTORY_MAX_BYTES={{ app_failure_history_max_bytes }}
+STATE_DIR="/run/${APP}-failure-alert"
+
+mkdir -p "${STATE_DIR}"
+
+property() {
+  systemctl show "${UNIT}" --property="$1" --value 2>/dev/null || true
+}
+
+timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+result="$(property Result)"
+exec_code="$(property ExecMainCode)"
+exec_status="$(property ExecMainStatus)"
+restart_count="$(property NRestarts)"
+active_entered="$(property ActiveEnterTimestamp)"
+inactive_entered="$(property InactiveEnterTimestamp)"
+journal_tail="$(journalctl -u "${UNIT}" -n "${JOURNAL_LINES}" --no-pager -o short-iso 2>/dev/null || true)"
+application_cause="$(
+  journalctl -u "${UNIT}" -n "${JOURNAL_LINES}" --no-pager -o json 2>/dev/null |
+    jq -r 'select(._COMM != "systemd" and .SYSLOG_IDENTIFIER != "systemd") | .MESSAGE // empty' |
+    sed '/^[[:space:]]*$/d' |
+    tail -n 1 ||
+    true
+)"
+case "${exec_code}:${exec_status}" in
+  2:*|3:*)
+    signal_name="$(kill -l "${exec_status}" 2>/dev/null || echo unknown)"
+    cause="main process terminated by signal ${signal_name} (${exec_status}); result=${result:-unknown}"
+    ;;
+  1:*)
+    cause="${application_cause:-main process exited with status ${exec_status}; result=${result:-unknown}}"
+    ;;
+  *)
+    cause="${application_cause:-no application log line was available; result=${result:-unknown}}"
+    ;;
+esac
+
+if [[ -n "${HISTORY_PATH}" ]]; then
+  mkdir -p "$(dirname "${HISTORY_PATH}")"
+  if [[ -f "${HISTORY_PATH}" ]] &&
+    [[ "$(stat -c %s "${HISTORY_PATH}")" -ge "${HISTORY_MAX_BYTES}" ]]; then
+    mv -f "${HISTORY_PATH}" "${HISTORY_PATH}.1"
+  fi
+
+  jq -cn \
+    --arg recorded_at "${timestamp}" \
+    --arg event "service_failure" \
+    --arg environment "${DEPLOY_ENV}" \
+    --arg unit "${UNIT}" \
+    --arg color "${COLOR}" \
+    --arg result "${result}" \
+    --arg exec_code "${exec_code}" \
+    --arg exec_status "${exec_status}" \
+    --arg restart_count "${restart_count}" \
+    --arg active_entered "${active_entered}" \
+    --arg inactive_entered "${inactive_entered}" \
+    --arg cause "${cause}" \
+    --arg journal_tail "${journal_tail}" \
+    '{recorded_at: $recorded_at, event: $event, environment: $environment,
+      unit: $unit, color: $color, result: $result, exec_code: $exec_code,
+      exec_status: $exec_status, restart_count: $restart_count,
+      active_entered: $active_entered, inactive_entered: $inactive_entered,
+      cause: $cause, journal_tail: $journal_tail}' \
+    >> "${HISTORY_PATH}"
+  chown "${DEPLOY_USER}:${DEPLOY_USER}" "${HISTORY_PATH}"
+  chmod 0640 "${HISTORY_PATH}"
+fi
+
+now="$(date -u +%s)"
+last_alert_file="${STATE_DIR}/${COLOR}.last-alert"
+last_alert="$(cat "${last_alert_file}" 2>/dev/null || echo 0)"
+if [[ "${last_alert}" =~ ^[0-9]+$ ]] &&
+  (( now - last_alert < COOLDOWN_SEC )); then
+  echo "Failure captured; Telegram alert suppressed by ${COOLDOWN_SEC}s cooldown for ${UNIT}."
+  exit 0
+fi
+printf '%s\n' "${now}" > "${last_alert_file}"
+
+html_escape() {
+  printf '%s' "$1" |
+    sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+message="$(
+  printf '❌ <b>[%s] %s service failed</b>\n' "${DEPLOY_ENV}" "${APP}"
+  printf 'Unit: <code>%s</code>\n' "$(html_escape "${UNIT}")"
+  printf 'Result: <code>%s</code> code=<code>%s</code> status=<code>%s</code>\n' \
+    "$(html_escape "${result:-unknown}")" \
+    "$(html_escape "${exec_code:-unknown}")" \
+    "$(html_escape "${exec_status:-unknown}")"
+  printf 'Restarts: <code>%s</code>\n' "$(html_escape "${restart_count:-unknown}")"
+  printf 'Cause: <code>%s</code>\n' "$(html_escape "${cause:0:500}")"
+  printf 'Investigate: <code>journalctl -u %s --since "-15 min"</code>' \
+    "$(html_escape "${UNIT}")"
+)"
+
+TELEGRAM_SILENT=false "${NOTIFY_SCRIPT}" "${message}"

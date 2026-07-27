@@ -23,6 +23,11 @@ PORT_GREEN="{{ app_port_green }}"
 HEALTH_PATH="{{ deploy_health_path }}"
 HEALTH_TIMEOUT_SEC={{ deploy_health_timeout_sec }}
 STANDBY_UNIT="{{ app_name }}-standby-end"
+OPERATION_LOCK_PATH="{{ deploy_operation_lock_path }}"
+
+mkdir -p "$(dirname "${OPERATION_LOCK_PATH}")"
+exec 9>"${OPERATION_LOCK_PATH}"
+flock 9
 
 cancel_standby_timer() {
   systemctl stop "${STANDBY_UNIT}.timer" "${STANDBY_UNIT}.service" 2>/dev/null || true

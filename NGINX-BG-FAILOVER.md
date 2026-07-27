@@ -1,7 +1,7 @@
 # Plan: bounded same-host failover for blue/green Phoenix
 
-Status: **implemented and live-validated on Agile-U staging; production rollout
-pending.**
+Status: **implemented and live-validated on Agile-U staging; operational
+hardening in progress before production rollout.**
 
 ## Goal
 
@@ -290,6 +290,34 @@ Tasks:
       a successful cutover.
 - [x] Confirm the NGINX error log records a stopped primary and sampled response
       identity proves that the standby served the subsequent requests.
+
+## Operational hardening before production
+
+The staging validation exposed gaps that must be closed before Agile-U
+production provisioning:
+
+- [x] Make the host Telegram transport return non-zero on API or delivery
+      failure and log a delivery receipt without exposing credentials.
+- [x] Verify configured Telegram bot and chat access during provisioning.
+- [ ] Correct Agile-U's Framagit Telegram variables and prove delivery from a
+      real pipeline.
+- [x] Rate-limit service-failure notifications while preserving an audit entry
+      for every crash.
+- [x] Record a bounded, durable failure ledger containing the systemd result,
+      exit code or signal, restart count, and relevant journal tail.
+- [x] Include the concise failure cause and exact investigation command in
+      Telegram alerts.
+- [x] Add a recurring readiness and public-smoke monitor. Require consecutive
+      failures to avoid flapping.
+- [x] During the standby window, fail over only after the standby passes direct
+      readiness; record and alert the transition.
+- [ ] Without a healthy standby, restart the unhealthy active service, record
+      the action, and ring an actionable alert.
+- [x] Serialize deploy, rollback, standby retirement, and health-watch changes
+      to the active-color/NGINX state.
+- [ ] Exercise Telegram verification, crash-cause capture, alert throttling,
+      HTTP 500 detection, runtime failover, and no-standby recovery on staging.
+- [ ] Re-run the production dry-run and stop for explicit rollout approval.
 
 ## Residual limitations
 

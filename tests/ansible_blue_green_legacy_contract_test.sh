@@ -21,6 +21,7 @@ for expected in \
   'app_service_environment_files:' \
   'app_service_exec_start:' \
   'app_service_on_failure: ""' \
+  'app_slot_metadata_env_file_template: ""' \
   'nginx_upstream_keepalive: 0' \
   'phoenix_release_node_env_var: "RELEASE_NODE"' \
   'phoenix_release_node_template: "{{ otp_app_name }}_%s"' \
@@ -49,6 +50,9 @@ grep -Fq 'ARTIFACT_KIND="{{ deploy_release_artifact_kind }}"' "${deploy}"
 grep -Fq 'SLOT_LAYOUT="{{ deploy_slot_layout }}"' "${deploy}"
 grep -Fq 'ARCHIVE_STRIP_COMPONENTS={{ deploy_archive_strip_components }}' "${deploy}"
 grep -Fq 'slot_env_file()' "${deploy}"
+grep -Fq 'slot_metadata_env_file()' "${deploy}"
+grep -Fq 'TARGET_METADATA_ENV_FILE="$(slot_metadata_env_file "${TARGET_COLOR}")"' "${deploy}"
+grep -Fq 'mv "${tmp_env}" "${TARGET_METADATA_ENV_FILE}"' "${deploy}"
 grep -Fq 'tar -xzf "${ARCHIVE_PATH}"' "${deploy}"
 grep -Fq 'case "${SLOT_LAYOUT}" in' "${deploy}"
 grep -Fq 'directory)' "${deploy}"

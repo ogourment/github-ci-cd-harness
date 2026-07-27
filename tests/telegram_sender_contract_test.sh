@@ -18,10 +18,10 @@ grep -Fq 'Live evidence: <a href=' "$acceptance_template"
 grep -Fq "grep '^ACCEPTANCE_METRIC '" "$acceptance_template"
 grep -Fq 'live_evidence_metrics.log' "$acceptance_template"
 
-printf '%s\n' 'asserting deploy senders do not include link previews or link-rich message payloads'
+printf '%s\n' 'asserting deploy senders disable link previews and avoid link-rich message payloads'
 ! grep -Fq 'link_preview_options=' "$cd_template"
 ! grep -Fq '<a href=' "$cd_template"
-! grep -Fq 'link_preview_options=' "$ansible_notifier"
+grep -Fq 'link_preview_options={"is_disabled":true}' "$ansible_notifier"
 ! grep -Fq '<a href=' "$ansible_notifier"
 
 printf '%s\n' 'telegram sender contract tests: passed'

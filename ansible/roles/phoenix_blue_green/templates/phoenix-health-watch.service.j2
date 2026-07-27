@@ -1,0 +1,8 @@
+[Unit]
+Description={{ app_name }} readiness and public-smoke watchdog
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={{ app_health_watch_script }}

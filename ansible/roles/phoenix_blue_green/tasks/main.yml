@@ -15,9 +15,14 @@
       - deploy_release_artifact_kind in ['directory', 'archive']
       - deploy_slot_layout in ['symlink', 'directory']
       - app_slot_env_file_template is search('%s')
+      - app_slot_metadata_env_file_template | length == 0 or app_slot_metadata_env_file_template is search('%s')
       - nginx_upstream_keepalive | int >= 0
       - phoenix_release_node_env_var is match('^[A-Z][A-Z0-9_]*$')
       - phoenix_release_node_template is search('%s')
+      - (not (app_manage_failure_alert_unit | bool)) or app_service_on_failure == app_name ~ '-alert@%i.service'
+      - app_health_watch_interval_sec | int >= 0
+      - app_health_watch_failure_threshold | int > 0
+      - app_health_watch_action_cooldown_sec | int > 0
     quiet: true
 
 - name: Ensure app root exists
@@ -76,6 +81,54 @@
     group: root
     mode: "0755"
 
+- name: Install failure capture and alert script
+  ansible.builtin.template:
+    src: phoenix_failure_alert.sh.j2
+    dest: "{{ app_failure_alert_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when: app_manage_failure_alert_unit | bool
+
+- name: Install failure capture and alert unit
+  ansible.builtin.template:
+    src: phoenix-alert@.service.j2
+    dest: "/etc/systemd/system/{{ app_name }}-alert@.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  when: app_manage_failure_alert_unit | bool
+
+- name: Install recurring health watch script
+  ansible.builtin.template:
+    src: phoenix_health_watch.sh.j2
+    dest: "{{ app_health_watch_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when: app_health_watch_interval_sec | int > 0
+
+- name: Install recurring health watch service
+  ansible.builtin.template:
+    src: phoenix-health-watch.service.j2
+    dest: "/etc/systemd/system/{{ app_name }}-health-watch.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  when: app_health_watch_interval_sec | int > 0
+
+- name: Install recurring health watch timer
+  ansible.builtin.template:
+    src: phoenix-health-watch.timer.j2
+    dest: "/etc/systemd/system/{{ app_name }}-health-watch.timer"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  when: app_health_watch_interval_sec | int > 0
+
 - name: Create per-slot environment files
   ansible.builtin.template:
     src: phoenix.env.j2
@@ -91,6 +144,28 @@
     slot_color: "{{ item.color }}"
   notify: Restart active color
 
+- name: Initialize per-slot deployment metadata files
+  ansible.builtin.copy:
+    dest: "{{ app_slot_metadata_env_file_template | replace('%s', item) }}"
+    content: ""
+    force: false
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0600"
+  loop:
+    - blue
+    - green
+  when: app_slot_metadata_env_file_template | length > 0
+
+- name: Verify Telegram bot and chat access
+  ansible.builtin.command:
+    argv:
+      - "{{ telegram_notify_script }}"
+      - "--verify"
+  changed_when: false
+  no_log: true
+  when: telegram_verify_on_provision | bool
+
 - name: Initialize current_color pointer (first provisioning only)
   ansible.builtin.copy:
     dest: "{{ app_current_color_file }}"
@@ -99,6 +174,17 @@
     owner: "{{ deploy_user }}"
     group: "{{ deploy_user }}"
     mode: "0644"
+
+- name: Read committed color
+  ansible.builtin.slurp:
+    src: "{{ app_current_color_file }}"
+  register: committed_color_file
+
+- name: Validate committed color
+  ansible.builtin.assert:
+    that:
+      - (committed_color_file.content | b64decode | trim) in ['blue', 'green']
+    quiet: true
 
 - name: Seed nginx upstream include (first provisioning only)
   ansible.builtin.copy:
@@ -147,5 +233,28 @@
     name: "{{ app_name }}@{{ item.item }}.service"
     state: started
   loop: "{{ color_release_bins.results }}"
-  when: item.stat.exists
+  when:
+    - item.stat.exists
+    - item.item == (committed_color_file.content | b64decode | trim)
   failed_when: false
+
+- name: Enable recurring health watch timer
+  ansible.builtin.systemd:
+    name: "{{ app_name }}-health-watch.timer"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - app_health_watch_interval_sec | int > 0
+    - not ansible_check_mode
+
+- name: Disable recurring health watch timer when monitoring is off
+  ansible.builtin.systemd:
+    name: "{{ app_name }}-health-watch.timer"
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  failed_when: false
+  when:
+    - app_health_watch_interval_sec | int == 0
+    - not ansible_check_mode
