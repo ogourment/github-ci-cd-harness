@@ -15,7 +15,8 @@ MESSAGE="${1:-}"
 [[ -n "${MESSAGE}" ]] || exit 0
 
 CURRENT_COLOR="$(cat {{ app_current_color_file }} 2>/dev/null || echo blue)"
-ENV_FILE="{{ app_env_file }}_${CURRENT_COLOR}"
+SLOT_ENV_FILE_TEMPLATE="{{ app_slot_env_file_template }}"
+ENV_FILE="${SLOT_ENV_FILE_TEMPLATE/\%s/${CURRENT_COLOR}}"
 [[ -f "${ENV_FILE}" ]] && { set -a; . "${ENV_FILE}"; set +a; }
 
 : "${TELEGRAM_BOT_TOKEN:=}"

@@ -7,6 +7,7 @@ defaults="${role}/defaults/main.yml"
 tasks="${role}/tasks/main.yml"
 deploy="${role}/templates/phoenix_deploy.sh.j2"
 service="${role}/templates/phoenix@.service.j2"
+notify="${role}/templates/phoenix_telegram_notify.sh.j2"
 
 for expected in \
   'deploy_release_artifact_kind: "directory"' \
@@ -31,6 +32,8 @@ grep -Fq 'EnvironmentFile={{ environment_file }}' "${service}"
 grep -Fq '{% if app_service_on_failure %}' "${service}"
 grep -Fq 'OnFailure={{ app_service_on_failure }}' "${service}"
 grep -Fq 'ExecStart={{ app_service_exec_start }}' "${service}"
+grep -Fq 'SLOT_ENV_FILE_TEMPLATE="{{ app_slot_env_file_template }}"' "${notify}"
+grep -Fq 'ENV_FILE="${SLOT_ENV_FILE_TEMPLATE/\%s/${CURRENT_COLOR}}"' "${notify}"
 
 grep -Fq 'ARTIFACT_KIND="{{ deploy_release_artifact_kind }}"' "${deploy}"
 grep -Fq 'SLOT_LAYOUT="{{ deploy_slot_layout }}"' "${deploy}"

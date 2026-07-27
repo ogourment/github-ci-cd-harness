@@ -267,7 +267,8 @@ Tasks:
       liveness/readiness/synthetic-smoke contract, opt-in safety gate,
       recommended 300-second window, and residual limitations.
 - [x] Release the initial behavior in `0.7.0`, the exact-release retry fix in
-      `0.7.1`, and existing-host compatibility settings in `0.7.2`.
+      `0.7.1`, existing-host compatibility settings in `0.7.2`, and custom
+      slot-env notifier support in `0.7.3`.
 
 ## Verification before release
 
