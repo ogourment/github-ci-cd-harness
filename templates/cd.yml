@@ -30,6 +30,7 @@ variables:
 
     : "${CI_CD_APP_NAME:=${CI_PROJECT_NAME:-project}}"
     : "${CI_CD_DEPLOY_TARGET:=unknown}"
+    : "${CI_CD_ALERT_ADAPTER:=}"
 
     if [ "${CI_JOB_STATUS:-success}" = "success" ]; then
       deploy_icon="✅"
@@ -160,7 +161,49 @@ variables:
       fi
     fi
 
-    if [ "${TELEGRAM_BOT_TOKEN:-}" != "" ] && [ "${TELEGRAM_CHAT_ID:-}" != "" ]; then
+    if [ -n "$CI_CD_ALERT_ADAPTER" ]; then
+      alert_summary_path="/tmp/ci-cd-alert-summary-${CI_JOB_ID:-unknown}.txt"
+      alert_details_path="/tmp/ci-cd-alert-details-${CI_JOB_ID:-unknown}.txt"
+      alert_event_path="/tmp/ci-cd-alert-event-${CI_JOB_ID:-unknown}.json"
+
+      printf '%s\n' "${CI_CD_APP_NAME} ${CI_CD_DEPLOY_TARGET} ${deploy_status}" >"$alert_summary_path"
+      {
+        printf 'Release: %s\n' "$release_id"
+        printf 'Version: %s\n' "$app_version"
+        printf 'Actor: %s\n' "$actor"
+        printf 'Timing: deploy=%s wait=%s total=%s\n' \
+          "$(duration_label "${deploy_seconds}")" \
+          "$(duration_label "${wait_seconds}")" \
+          "$(duration_label "${total_seconds}")"
+        if [ -n "${ci_deploy_commit_messages:-}" ]; then
+          printf 'Commits:\n%s\n' "$ci_deploy_commit_messages"
+        fi
+      } >"$alert_details_path"
+
+      if [ "$deploy_status" = "deployed" ]; then
+        export CI_CD_ALERT_STATUS=success
+        export CI_CD_ALERT_SEVERITY=info
+      else
+        export CI_CD_ALERT_STATUS=failed
+        export CI_CD_ALERT_SEVERITY=critical
+      fi
+      export CI_CD_ALERT_SUMMARY_PATH="$alert_summary_path"
+      export CI_CD_ALERT_DETAILS_PATH="$alert_details_path"
+      export CI_CD_ALERT_EVIDENCE_PATH="$health_file"
+      export CI_CD_ALERT_EVIDENCE_URL="${CI_CD_HEALTH_URL:-}"
+      export CI_CD_ALERT_APPLICATION="$CI_CD_APP_NAME"
+      export CI_CD_ALERT_ENVIRONMENT="$CI_CD_DEPLOY_TARGET"
+      export CI_CD_ALERT_HOST="${CI_CD_DEPLOY_HOST:-unknown}"
+      export CI_CD_ALERT_RELEASE_ID="$release_id"
+      export CI_CD_ALERT_RELEASE_VERSION="$app_version"
+
+      alert_helper="${CI_CD_ALERT_HELPER:-.gitlab-ci-cd-harness/scripts/ci_cd_alert_event.sh}"
+      if [ -x "$alert_helper" ]; then
+        "$alert_helper" deployment "$alert_event_path"
+      else
+        echo "deploy alert failed: helper is not executable at $alert_helper"
+      fi
+    elif [ "${TELEGRAM_BOT_TOKEN:-}" != "" ] && [ "${TELEGRAM_CHAT_ID:-}" != "" ]; then
       curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
         --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
         --data-urlencode "text=${message}" \

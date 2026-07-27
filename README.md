@@ -374,7 +374,9 @@ variables:
 variables:
   ACCEPTANCE_APP_VERSION: ""                      # fallback shown in summary
   ACCEPTANCE_TELEGRAM_MESSAGE_PATH: "acceptance_summary.txt"
-  ACCEPTANCE_NOTIFY_COMMAND: ""                     # custom notifier; e.g. script that reads the message from a file
+  CI_CD_ALERT_ADAPTER: ""                          # executable receiving one ops-alert-event.v1 JSON file
+  CI_CD_ALERT_HELPER: ""                           # optional path override for scripts/ci_cd_alert_event.sh
+  ACCEPTANCE_NOTIFY_COMMAND: ""                    # deprecated compatibility notifier
   ACCEPTANCE_REMOTE_INVENTORY: ""
   ACCEPTANCE_REMOTE_APP_ROOT: ""
   ACCEPTANCE_REMOTE_ENV_DIR: ""
@@ -389,14 +391,44 @@ variables:
 `ACCEPTANCE_TELEGRAM_MESSAGE_PATH` is interpreted as a filename relative to
 `$ACCEPTANCE_EVIDENCE_DIR`.
 
-## Notification policy
+## Alert delivery and notification policy
+
+Set `CI_CD_ALERT_ADAPTER` to an executable to route acceptance and deployment
+outcomes to an alerting service. The harness invokes it without a shell:
+
+```sh
+"$CI_CD_ALERT_ADAPTER" "$event_file"
+```
+
+The event file uses the `ops-alert-event.v1` contract and includes:
+
+- stable `id` and `idempotency_key` values derived from the project, pipeline,
+  job, event kind, result, and environment;
+- RFC 3339 `occurred_at` plus an explicit `timezone`;
+- source, kind, severity, status, application, environment, and host;
+- pipeline, job, release, and commit identifiers and URLs;
+- `fingerprint` and `correlation_key` values for incident grouping;
+- a short summary, details, and evidence path/URL.
+
+The adapter is opt-in. When it is unset, the existing Telegram sender remains
+the default. A configured adapter failure is logged but does not fall through
+to Telegram, preventing duplicate delivery, and notification transport never
+changes the deploy or acceptance result.
+
+`acceptance_gate` obtains the shared event helper only when the adapter is
+enabled. Set `CI_CD_HARNESS_REF` to the same immutable harness tag used by the
+consumer includes. Deploy jobs already fetch that harness checkout.
+
+`ACCEPTANCE_NOTIFY_COMMAND` remains available for migration but is deprecated.
+It is considered only when `CI_CD_ALERT_ADAPTER` is unset. Its existing message
+environment remains unchanged.
 
 CI/CD Telegram notifications follow one bell policy across templates:
 successful acceptance and deployment messages are sent with
 `disable_notification=true`, while failed acceptance and deployment messages are
 sent with `disable_notification=false`.
 
-The built-in acceptance Telegram sender applies this directly. Custom
+The built-in acceptance Telegram sender applies this directly. Deprecated
 `ACCEPTANCE_NOTIFY_COMMAND` scripts receive `ACCEPTANCE_NOTIFY_SILENT=true` for
 successful acceptance and `false` for failures.
 

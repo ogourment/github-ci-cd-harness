@@ -227,6 +227,7 @@ acceptance_gate:
       : "${ACCEPTANCE_TELEGRAM_MESSAGE_PATH:=acceptance_summary.txt}"
       acceptance_message_path="${ACCEPTANCE_EVIDENCE_DIR%/}/${ACCEPTANCE_TELEGRAM_MESSAGE_PATH}"
       : "${ACCEPTANCE_NOTIFY_COMMAND:=}"
+      : "${CI_CD_ALERT_ADAPTER:=}"
 
       if [ ! -s "$acceptance_message_path" ]; then
         echo "acceptance notify skipped: missing summary at $acceptance_message_path"
@@ -238,7 +239,53 @@ acceptance_gate:
         acceptance_notify_silent=true
       fi
 
-      if [ -n "$ACCEPTANCE_NOTIFY_COMMAND" ]; then
+      if [ -n "$CI_CD_ALERT_ADAPTER" ]; then
+        alert_helper="${CI_CD_ALERT_HELPER:-.gitlab-ci-cd-harness/scripts/ci_cd_alert_event.sh}"
+
+        if [ ! -x "$alert_helper" ]; then
+          : "${CI_CD_HARNESS_PROJECT:=olivierg/gitlab-ci-cd-harness}"
+          : "${CI_CD_HARNESS_REF:?CI_CD_HARNESS_REF is required when CI_CD_ALERT_ADAPTER is set}"
+          rm -rf .gitlab-ci-cd-harness
+          git clone --depth 1 --branch "$CI_CD_HARNESS_REF" \
+            "https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_CD_HARNESS_PROJECT}.git" \
+            .gitlab-ci-cd-harness
+        fi
+
+        alert_summary_path="/tmp/ci-cd-alert-summary-${CI_JOB_ID:-unknown}.txt"
+        alert_event_path="/tmp/ci-cd-alert-event-${CI_JOB_ID:-unknown}.json"
+        if [ "$acceptance_notify_silent" = "true" ]; then
+          acceptance_result=passed
+          acceptance_alert_status=success
+          acceptance_alert_severity=info
+        else
+          acceptance_result=failed
+          acceptance_alert_status=failed
+          acceptance_alert_severity=critical
+        fi
+
+        printf '%s\n' \
+          "${ACCEPTANCE_APP_NAME:-${CI_PROJECT_NAME:-Application}} acceptance ${acceptance_result}" \
+          >"$alert_summary_path"
+
+        export CI_CD_ALERT_STATUS="$acceptance_alert_status"
+        export CI_CD_ALERT_SEVERITY="$acceptance_alert_severity"
+        export CI_CD_ALERT_SUMMARY_PATH="$alert_summary_path"
+        export CI_CD_ALERT_DETAILS_PATH="$acceptance_message_path"
+        export CI_CD_ALERT_EVIDENCE_PATH="${ACCEPTANCE_EVIDENCE_DIR%/}/evidence.json"
+        export CI_CD_ALERT_EVIDENCE_URL="${ACCEPTANCE_REPORT_URL:-${CI_JOB_URL:-}}"
+        export CI_CD_ALERT_APPLICATION="${ACCEPTANCE_APP_NAME:-${CI_PROJECT_NAME:-unknown}}"
+        export CI_CD_ALERT_ENVIRONMENT="${ACCEPTANCE_ENVIRONMENT:-${ACCEPTANCE_TARGET:-unknown}}"
+        export CI_CD_ALERT_HOST="${ACCEPTANCE_HOST:-unknown}"
+        export CI_CD_ALERT_RELEASE_ID="${ACCEPTANCE_RELEASE_ID:-unknown}"
+        export CI_CD_ALERT_RELEASE_VERSION="${ACCEPTANCE_APP_VERSION:-unknown}"
+
+        if [ -x "$alert_helper" ]; then
+          "$alert_helper" acceptance "$alert_event_path"
+        else
+          echo "acceptance alert failed: helper is not executable at $alert_helper"
+        fi
+      elif [ -n "$ACCEPTANCE_NOTIFY_COMMAND" ]; then
+        echo "ACCEPTANCE_NOTIFY_COMMAND is deprecated; use CI_CD_ALERT_ADAPTER"
         export ACCEPTANCE_MESSAGE_PATH="$acceptance_message_path"
         export ACCEPTANCE_MESSAGE="$(cat "$acceptance_message_path")"
         export ACCEPTANCE_NOTIFY_SILENT="$acceptance_notify_silent"
