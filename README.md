@@ -52,10 +52,10 @@ Include this repository in consuming pipelines:
 ```yaml
   include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.7.1
+    ref: v0.7.2
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.7.1
+    ref: v0.7.2
     file: /templates/cd.yml
 ```
 
@@ -218,6 +218,27 @@ deploy_standby_sec: 300
 deploy_health_path: "/health/deep"
 deploy_public_smoke_path: "/"
 ```
+
+Consumers migrating an existing blue/green host can preserve its release
+archive interface, real-directory slots, env-file names, and systemd command:
+
+```yaml
+deploy_release_artifact_kind: "archive"
+deploy_slot_layout: "directory"
+deploy_archive_strip_components: 1
+app_slot_env_file_template: "/etc/my_app/my_app-%s.env"
+app_service_environment_files:
+  - "/etc/my_app/my_app.env"
+  - "/etc/my_app/my_app-%i.env"
+app_service_exec_start: "/opt/my_app/slots/%i/bin/server"
+release_seed_after_migrate: false
+deployment_history_path: "/var/lib/my_app/deployments.jsonl"
+```
+
+The defaults remain the harness-native directory artifact, symlink slots,
+underscore-named slot env file, OTP release start command, post-migration seed
+hook, and no host JSON history. Set `app_service_on_failure` when an existing
+unit has an alert target that must be retained.
 
 Enable it only after confirming that migrations remain backward-compatible
 and that two release instances cannot duplicate unsafe scheduled, singleton,

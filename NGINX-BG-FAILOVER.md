@@ -1,6 +1,6 @@
 # Plan: bounded same-host failover for blue/green Phoenix
 
-Status: **implemented; live failover validation remaining.**
+Status: **implemented; Agile-U staging live validation in progress.**
 
 ## Goal
 
@@ -255,6 +255,9 @@ Tasks:
       timer cancellation, safe standby retirement, transactional
       `current_color`, public identity verification, HTML smoke verification,
       and failed-cutover restoration.
+- [x] Preserve existing consumer archive deploys, directory slots, env-file
+      conventions, service commands, optional alert units, migration hooks,
+      and host deployment history through explicit role settings.
 - [x] Add a fixture test where loopback readiness succeeds but the public page
       returns 500. Use a configurable route name and assert that the old color
       remains committed and the deploy fails.
@@ -263,7 +266,8 @@ Tasks:
 - [x] Document the consumer/harness boundary,
       liveness/readiness/synthetic-smoke contract, opt-in safety gate,
       recommended 300-second window, and residual limitations.
-- [x] Bump `VERSION` from `0.6.22` to `0.7.0` and update README include refs.
+- [x] Release the initial behavior in `0.7.0`, the exact-release retry fix in
+      `0.7.1`, and existing-host compatibility settings in `0.7.2`.
 
 ## Verification before release
 

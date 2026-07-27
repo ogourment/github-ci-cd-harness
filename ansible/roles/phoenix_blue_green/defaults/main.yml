@@ -11,15 +11,25 @@ app_bind_ip: "127.0.0.1"
 # Filesystem layout (derived from app_name unless overridden).
 app_root: "/opt/{{ app_name }}"
 app_env_file: "/etc/default/{{ app_name }}"
+app_slot_env_file_template: "{{ app_env_file }}_%s"
 app_current_color_file: "{{ app_root }}/current_color"
 deploy_releases_root: "/home/{{ deploy_user }}/releases"
 deploy_script_path: "/usr/local/bin/{{ app_name }}_deploy"
 deploy_rollback_script_path: "/usr/local/bin/{{ app_name }}_rollback"
 deploy_standby_end_script: "/usr/local/bin/{{ app_name }}_standby_end"
 telegram_notify_script: "/usr/local/bin/{{ app_name }}_telegram_notify"
+deploy_release_artifact_kind: "directory"
+deploy_slot_layout: "symlink"
+deploy_archive_strip_components: 1
+release_seed_after_migrate: true
+deployment_history_path: ""
 
 # systemd template unit base name ({{ app_name }}@blue / @green).
 app_service_name: "{{ app_name }}"
+app_service_environment_files:
+  - "{{ app_slot_env_file_template | replace('%s', '%i') }}"
+app_service_exec_start: "{{ app_root }}/%i/bin/{{ otp_app_name }} start"
+app_service_on_failure: ""
 
 # Cutover tuning.
 deploy_health_path: "/health"

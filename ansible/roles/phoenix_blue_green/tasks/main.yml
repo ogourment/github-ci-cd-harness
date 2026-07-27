@@ -12,6 +12,9 @@
       - deploy_user is defined and deploy_user | length > 0
       - secret_key_base is defined and secret_key_base | length > 0
       - release_migrate_module is defined and release_migrate_module | length > 0
+      - deploy_release_artifact_kind in ['directory', 'archive']
+      - deploy_slot_layout in ['symlink', 'directory']
+      - app_slot_env_file_template is search('%s')
     quiet: true
 
 - name: Ensure app root exists
@@ -73,7 +76,7 @@
 - name: Create per-slot environment files
   ansible.builtin.template:
     src: phoenix.env.j2
-    dest: "{{ app_env_file }}_{{ item.color }}"
+    dest: "{{ app_slot_env_file_template | replace('%s', item.color) }}"
     owner: "{{ deploy_user }}"
     group: "{{ deploy_user }}"
     mode: "0600"

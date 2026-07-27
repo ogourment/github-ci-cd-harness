@@ -3,7 +3,10 @@
 # Two-instance zero-downtime blue/green deploy for {{ app_name }}.
 # Managed by Ansible at {{ deploy_script_path }} — do not edit by hand.
 #
-# Usage:  sudo {{ deploy_script_path }} <release_id> [migrate]
+# Directory artifact usage:
+#   sudo {{ deploy_script_path }} <release_id> [migrate]
+# Archive artifact usage:
+#   sudo {{ deploy_script_path }} <archive_path> <release_id> [migrate]
 #
 # Flow: stage release into the idle color → migrate → start → readiness check
 # (version + color via {{ deploy_health_path }}) → candidate nginx cutover →
@@ -20,8 +23,12 @@ NGINX_UPSTREAM_FILE="{{ nginx_upstream_include }}"
 NGINX_UPSTREAM_NAME="{{ nginx_upstream_name }}"
 CURRENT_COLOR_FILE="{{ app_current_color_file }}"
 ENV_FILE_BASE="{{ app_env_file }}"
+SLOT_ENV_FILE_TEMPLATE="{{ app_slot_env_file_template }}"
 RELEASE_ID_ENV_VAR="{{ phoenix_release_id_env_var }}"
 PIPELINE_ID_ENV_VAR="{{ phoenix_pipeline_id_env_var }}"
+ARTIFACT_KIND="{{ deploy_release_artifact_kind }}"
+SLOT_LAYOUT="{{ deploy_slot_layout }}"
+ARCHIVE_STRIP_COMPONENTS={{ deploy_archive_strip_components }}
 
 PORT_BLUE="{{ app_port_blue }}"
 PORT_GREEN="{{ app_port_green }}"
@@ -43,9 +50,29 @@ PUBLIC_SMOKE_PATH="{{ deploy_public_smoke_path }}"
 PUBLIC_SMOKE_CONTENT_TYPE="{{ deploy_public_smoke_content_type }}"
 PUBLIC_SMOKE_TIMEOUT_SEC={{ deploy_public_smoke_timeout_sec }}
 
-RELEASE_ID="${1:?release id required}"
-RUN_MIGRATIONS="${2:-}"
-SRC_DIR="{{ deploy_releases_root }}/${RELEASE_ID}"
+case "${ARTIFACT_KIND}" in
+  directory)
+    RELEASE_ID="${1:?release id required}"
+    RUN_MIGRATIONS="${2:-}"
+    SRC_DIR="{{ deploy_releases_root }}/${RELEASE_ID}"
+    ARCHIVE_PATH=""
+    ;;
+  archive)
+    ARCHIVE_PATH="${1:?archive path required}"
+    RELEASE_ID="${2:?release id required}"
+    RUN_MIGRATIONS="${3:-}"
+    SRC_DIR=""
+    ;;
+  *)
+    echo "ERROR: unsupported artifact kind '${ARTIFACT_KIND}'" >&2
+    exit 1
+    ;;
+esac
+
+slot_env_file() {
+  local color="$1"
+  printf '%s\n' "${SLOT_ENV_FILE_TEMPLATE/\%s/${color}}"
+}
 
 # --- Deploy notifications (best-effort; never break the deploy) --------------
 DEPLOY_ENV="{{ deploy_env }}"
@@ -299,7 +326,11 @@ case "${CURRENT_COLOR}" in
   *) echo "ERROR: invalid current_color '${CURRENT_COLOR}'" >&2; exit 1 ;;
 esac
 
-RELEASE_DIR="${STAGE_ROOT}/releases/${RELEASE_ID}"
+case "${SLOT_LAYOUT}" in
+  symlink) RELEASE_DIR="${STAGE_ROOT}/releases/${RELEASE_ID}" ;;
+  directory) RELEASE_DIR="${STAGE_ROOT}/${TARGET_COLOR}" ;;
+  *) echo "ERROR: unsupported slot layout '${SLOT_LAYOUT}'" >&2; exit 1 ;;
+esac
 TARGET_LINK="${STAGE_ROOT}/${TARGET_COLOR}"
 TARGET_SERVICE="${SERVICE_BASE}@${TARGET_COLOR}.service"
 CURRENT_SERVICE="${SERVICE_BASE}@${CURRENT_COLOR}.service"
@@ -308,7 +339,16 @@ echo "==> Release     : ${RELEASE_ID}"
 echo "==> Live color  : ${CURRENT_COLOR}"
 echo "==> Target color: ${TARGET_COLOR} (port ${TARGET_PORT})"
 
-[[ -d "${SRC_DIR}" ]] || { echo "ERROR: source ${SRC_DIR} missing" >&2; exit 1; }
+case "${ARTIFACT_KIND}" in
+  directory)
+    [[ -d "${SRC_DIR}" ]] || { echo "ERROR: source ${SRC_DIR} missing" >&2; exit 1; }
+    ;;
+  archive)
+    [[ -f "${ARCHIVE_PATH}" ]] || { echo "ERROR: archive ${ARCHIVE_PATH} missing" >&2; exit 1; }
+    ARCHIVE_SHA256="$(sha256sum "${ARCHIVE_PATH}" | awk '{print $1}')"
+    ;;
+esac
+ARCHIVE_SHA256="${ARCHIVE_SHA256:-}"
 
 cancel_standby_timer
 if [[ "${STANDBY_SEC}" -gt 0 && -f "${CURRENT_COLOR_FILE}" ]]; then
@@ -320,15 +360,38 @@ if [[ "${STANDBY_SEC}" -gt 0 && -f "${CURRENT_COLOR_FILE}" ]]; then
 fi
 
 echo "==> Staging release..."
-CURRENT_RELEASE_DIR="$(readlink -f "${STAGE_ROOT}/${CURRENT_COLOR}" 2>/dev/null || true)"
-if [[ "${CURRENT_RELEASE_DIR}" == "${RELEASE_DIR}" && -d "${RELEASE_DIR}" ]]; then
-  echo "==> Reusing live release directory for exact-release retry"
-else
-  rm -rf "${RELEASE_DIR}"
-  mkdir -p "${RELEASE_DIR}"
-  rsync -a --delete "${SRC_DIR}/" "${RELEASE_DIR}/"
-  chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "${RELEASE_DIR}"
-fi
+case "${SLOT_LAYOUT}" in
+  symlink)
+    CURRENT_RELEASE_DIR="$(readlink -f "${STAGE_ROOT}/${CURRENT_COLOR}" 2>/dev/null || true)"
+    if [[ "${CURRENT_RELEASE_DIR}" == "${RELEASE_DIR}" && -d "${RELEASE_DIR}" ]]; then
+      echo "==> Reusing live release directory for exact-release retry"
+    else
+      rm -rf "${RELEASE_DIR}"
+      mkdir -p "${RELEASE_DIR}"
+      case "${ARTIFACT_KIND}" in
+        directory) rsync -a --delete "${SRC_DIR}/" "${RELEASE_DIR}/" ;;
+        archive) tar -xzf "${ARCHIVE_PATH}" --strip-components="${ARCHIVE_STRIP_COMPONENTS}" -C "${RELEASE_DIR}" ;;
+      esac
+      chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "${RELEASE_DIR}"
+    fi
+    ;;
+  directory)
+    candidate_dir="${STAGE_ROOT}/.${TARGET_COLOR}.${RELEASE_ID}.candidate"
+    previous_dir="${STAGE_ROOT}/${TARGET_COLOR}.previous"
+    rm -rf "${candidate_dir}"
+    mkdir -p "${candidate_dir}"
+    case "${ARTIFACT_KIND}" in
+      directory) rsync -a --delete "${SRC_DIR}/" "${candidate_dir}/" ;;
+      archive) tar -xzf "${ARCHIVE_PATH}" --strip-components="${ARCHIVE_STRIP_COMPONENTS}" -C "${candidate_dir}" ;;
+    esac
+    chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "${candidate_dir}"
+    rm -rf "${previous_dir}"
+    if [[ -d "${RELEASE_DIR}" ]]; then
+      mv "${RELEASE_DIR}" "${previous_dir}"
+    fi
+    mv "${candidate_dir}" "${RELEASE_DIR}"
+    ;;
+esac
 
 STATIC_SRC=""
 for dir in "${RELEASE_DIR}/lib/${OTP_APP}-"*/priv/static; do
@@ -337,13 +400,15 @@ done
 [[ -n "${STATIC_SRC}" ]] && ln -sfn "${STATIC_SRC}" "${RELEASE_DIR}/static_assets" \
   || echo "WARNING: no static assets under ${RELEASE_DIR}/lib/${OTP_APP}-*/priv/static"
 
-echo "==> Pointing ${TARGET_COLOR} → ${RELEASE_ID}"
-ln -sfn "${RELEASE_DIR}" "${TARGET_LINK}"
+if [[ "${SLOT_LAYOUT}" == "symlink" ]]; then
+  echo "==> Pointing ${TARGET_COLOR} → ${RELEASE_ID}"
+  ln -sfn "${RELEASE_DIR}" "${TARGET_LINK}"
+fi
 
 # The systemd unit reads its environment from the per-slot file, not this
 # deploy process. Keep the release identifier alongside the static slot
 # metadata before starting the target so readiness can attest the cutover.
-TARGET_ENV_FILE="${ENV_FILE_BASE}_${TARGET_COLOR}"
+TARGET_ENV_FILE="$(slot_env_file "${TARGET_COLOR}")"
 tmp_env="$(mktemp)"
 grep -Ev "^(${RELEASE_ID_ENV_VAR}|${PIPELINE_ID_ENV_VAR}|${GIT_SHA_ENV_VAR}|${GIT_REF_ENV_VAR}|${GIT_SUBJECT_ENV_VAR}|${GIT_MESSAGES_ENV_VAR}|${PIPELINE_URL_ENV_VAR}|${DEPLOYED_AT_ENV_VAR})=" "${TARGET_ENV_FILE}" > "${tmp_env}" || true
 append_runtime_env "${RELEASE_ID_ENV_VAR}" "${RELEASE_ID}" "${tmp_env}"
@@ -362,17 +427,19 @@ if [[ "${RUN_MIGRATIONS}" == "migrate" ]]; then
   echo "==> Running migrations (must be backward-compatible with ${CURRENT_COLOR})..."
   sudo -u "${DEPLOY_USER}" bash -lc "
     set -euo pipefail
-    set -a; [[ -f '${ENV_FILE_BASE}_${TARGET_COLOR}' ]] && source '${ENV_FILE_BASE}_${TARGET_COLOR}'; set +a
+    set -a; [[ -f '${TARGET_ENV_FILE}' ]] && source '${TARGET_ENV_FILE}'; set +a
     cd '${RELEASE_DIR}'
     MIX_ENV=prod 'bin/${OTP_APP}' eval '${MIGRATE_MODULE}.migrate()'
   "
+{% if release_seed_after_migrate %}
   echo "==> Running release seeds..."
   sudo -u "${DEPLOY_USER}" bash -lc "
     set -euo pipefail
-    set -a; [[ -f '${ENV_FILE_BASE}_${TARGET_COLOR}' ]] && source '${ENV_FILE_BASE}_${TARGET_COLOR}'; set +a
+    set -a; [[ -f '${TARGET_ENV_FILE}' ]] && source '${TARGET_ENV_FILE}'; set +a
     cd '${RELEASE_DIR}'
     MIX_ENV=prod 'bin/${OTP_APP}' eval '${MIGRATE_MODULE}.seed()'
   "
+{% endif %}
 fi
 
 echo "==> Starting ${TARGET_SERVICE}..."
@@ -431,10 +498,37 @@ sudo -u "${DEPLOY_USER}" env \
   CI_PIPELINE_URL="${CI_PIPELINE_URL}" \
   bash -lc "
   set -euo pipefail
-  set -a; [[ -f '${ENV_FILE_BASE}_${TARGET_COLOR}' ]] && source '${ENV_FILE_BASE}_${TARGET_COLOR}'; set +a
+  set -a; [[ -f '${TARGET_ENV_FILE}' ]] && source '${TARGET_ENV_FILE}'; set +a
   cd '${RELEASE_DIR}'
   MIX_ENV=prod 'bin/${OTP_APP}' eval '${MIGRATE_MODULE}.record_deployment(\"${RELEASE_ID}\", \"${DEPLOY_ENV}\", \"${TARGET_COLOR}\", \"${EXPECTED_VERSION}\")'
 " || echo "WARNING: deployment timeline entry could not be recorded"
+{% endif %}
+
+{% if deployment_history_path %}
+echo "==> Recording host deployment history..."
+HISTORY_PATH="{{ deployment_history_path }}"
+mkdir -p "$(dirname "${HISTORY_PATH}")"
+jq -cn \
+  --arg deployed_at "${DEPLOYED_AT}" \
+  --arg release_id "${RELEASE_ID}" \
+  --arg environment "${DEPLOY_ENV}" \
+  --arg slot "${TARGET_COLOR}" \
+  --arg app_version "${APP_VERSION}" \
+  --arg git_sha "${GIT_SHA}" \
+  --arg git_ref "${GIT_REF}" \
+  --arg git_subject "${GIT_SUBJECT}" \
+  --arg git_messages "${GIT_MESSAGES}" \
+  --arg actor "${ACTOR}" \
+  --arg archive_sha256 "${ARCHIVE_SHA256}" \
+  '{deployed_at: $deployed_at, environment: $environment, release_id: $release_id,
+    app_version: $app_version, git_sha: $git_sha, git_ref: $git_ref,
+    git_subject: $git_subject,
+    git_messages: ($git_messages | split("\n") | map(select(length > 0))),
+    slot: $slot, actor: $actor, archive_sha256: $archive_sha256}' \
+  >> "${HISTORY_PATH}" ||
+  echo "WARNING: host deployment history could not be recorded"
+chown "${DEPLOY_USER}:${DEPLOY_USER}" "${HISTORY_PATH}"
+chmod 0640 "${HISTORY_PATH}"
 {% endif %}
 
 if [[ "${CURRENT_COLOR}" != "${TARGET_COLOR}" ]] && systemctl is-active --quiet "${CURRENT_SERVICE}"; then
@@ -497,11 +591,13 @@ prune_releases() {
 }
 {% endraw %}
 
-BLUE_ID="$(basename "$(readlink -f "${STAGE_ROOT}/blue" 2>/dev/null || echo /dev/null)")"
-GREEN_ID="$(basename "$(readlink -f "${STAGE_ROOT}/green" 2>/dev/null || echo /dev/null)")"
-echo "==> Pruning old releases..."
-prune_releases "${STAGE_ROOT}/releases"     "${RELEASE_ID}" "${BLUE_ID}" "${GREEN_ID}"
-prune_releases "{{ deploy_releases_root }}" "${RELEASE_ID}"
+if [[ "${SLOT_LAYOUT}" == "symlink" ]]; then
+  BLUE_ID="$(basename "$(readlink -f "${STAGE_ROOT}/blue" 2>/dev/null || echo /dev/null)")"
+  GREEN_ID="$(basename "$(readlink -f "${STAGE_ROOT}/green" 2>/dev/null || echo /dev/null)")"
+  echo "==> Pruning old releases..."
+  prune_releases "${STAGE_ROOT}/releases"     "${RELEASE_ID}" "${BLUE_ID}" "${GREEN_ID}"
+  prune_releases "{{ deploy_releases_root }}" "${RELEASE_ID}"
+fi
 
 # CI publishes the canonical successful deployment summary. Consumers can opt
 # into this host-side success message for deployments that are not CI-driven.
