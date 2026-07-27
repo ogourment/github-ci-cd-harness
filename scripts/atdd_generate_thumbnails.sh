@@ -28,6 +28,14 @@ if ! command -v "${converter}" >/dev/null 2>&1; then
   exit 1
 fi
 
+file_size() {
+  if stat -c '%s' -- "$1" >/dev/null 2>&1; then
+    stat -c '%s' -- "$1"
+  else
+    stat -f '%z' -- "$1"
+  fi
+}
+
 mkdir -p "${thumbnails_dir}"
 temporary=""
 stats_temporary=""
@@ -68,8 +76,8 @@ while IFS= read -r -d '' screenshot; do
   mv -f -- "${temporary}" "${thumbnail}"
   temporary=""
   thumbnail_count=$((thumbnail_count + 1))
-  source_bytes=$((source_bytes + $(stat -c '%s' -- "${screenshot}")))
-  thumbnail_bytes=$((thumbnail_bytes + $(stat -c '%s' -- "${thumbnail}")))
+  source_bytes=$((source_bytes + $(file_size "${screenshot}")))
+  thumbnail_bytes=$((thumbnail_bytes + $(file_size "${thumbnail}")))
 done < <(find "${screenshots_dir}" -maxdepth 1 -type f -name '*.png' -print0)
 
 saved_bytes=$((source_bytes - thumbnail_bytes))

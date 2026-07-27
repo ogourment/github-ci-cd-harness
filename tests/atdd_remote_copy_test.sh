@@ -15,6 +15,32 @@ ssh_args_log="${test_root}/ssh-args"
 mkdir -p "${bin_dir}"
 touch "${key_file}"
 
+set_file_time() {
+  local timestamp="$1"
+  local file="$2"
+
+  if touch -d "$timestamp" "$file" >/dev/null 2>&1; then
+    return
+  fi
+
+  case "$timestamp" in
+    '2026-07-20 12:00:00 UTC') touch -t 202607201200.00 "$file" ;;
+    '2026-07-21 12:00:00 UTC') touch -t 202607211200.00 "$file" ;;
+    *)
+      echo "unsupported fixture timestamp: $timestamp" >&2
+      return 1
+      ;;
+  esac
+}
+
+inode_number() {
+  if stat -c '%i' "$1" >/dev/null 2>&1; then
+    stat -c '%i' "$1"
+  else
+    stat -f '%i' "$1"
+  fi
+}
+
 printf '%s\n' \
   "staging ansible_host=staging.example.test ansible_user=release ansible_private_key_file='${key_file}'" \
   > "${inventory}"
@@ -185,13 +211,13 @@ if [[ -n "${real_rsync}" ]]; then
   mkdir -p "${hardlink_source}" "${hardlink_basis}"
   printf 'unchanged screenshot\n' > "${hardlink_source}/step.png"
   printf 'unchanged screenshot\n' > "${hardlink_basis}/step.png"
-  touch -d '2026-07-20 12:00:00 UTC' "${hardlink_basis}/step.png"
-  touch -d '2026-07-21 12:00:00 UTC' "${hardlink_source}/step.png"
+  set_file_time '2026-07-20 12:00:00 UTC' "${hardlink_basis}/step.png"
+  set_file_time '2026-07-21 12:00:00 UTC' "${hardlink_source}/step.png"
   "${real_rsync}" --archive --no-times --checksum \
     "--link-dest=${hardlink_basis}" \
     "${hardlink_source}/" "${hardlink_destination}/"
-  [[ "$(stat -c '%i' "${hardlink_basis}/step.png")" == \
-    "$(stat -c '%i' "${hardlink_destination}/step.png")" ]]
+  [[ "$(inode_number "${hardlink_basis}/step.png")" == \
+    "$(inode_number "${hardlink_destination}/step.png")" ]]
 fi
 
 echo "atdd_remote_copy_test: passed"
