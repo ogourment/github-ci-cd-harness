@@ -1,7 +1,7 @@
 # Plan: bounded same-host failover for blue/green Phoenix
 
-Status: **implemented and live-validated on Agile-U staging; operational
-hardening in progress before production rollout.**
+Status: **implemented, hardened, and live-validated on Agile-U staging;
+production rollout pending explicit approval.**
 
 ## Goal
 
@@ -299,7 +299,7 @@ production provisioning:
 - [x] Make the host Telegram transport return non-zero on API or delivery
       failure and log a delivery receipt without exposing credentials.
 - [x] Verify configured Telegram bot and chat access during provisioning.
-- [ ] Correct Agile-U's Framagit Telegram variables and prove delivery from a
+- [x] Correct Agile-U's Framagit Telegram variables and prove delivery from a
       real pipeline.
 - [x] Rate-limit service-failure notifications while preserving an audit entry
       for every crash.
@@ -311,13 +311,13 @@ production provisioning:
       failures to avoid flapping.
 - [x] During the standby window, fail over only after the standby passes direct
       readiness; record and alert the transition.
-- [ ] Without a healthy standby, restart the unhealthy active service, record
+- [x] Without a healthy standby, restart the unhealthy active service, record
       the action, and ring an actionable alert.
 - [x] Serialize deploy, rollback, standby retirement, and health-watch changes
       to the active-color/NGINX state.
-- [ ] Exercise Telegram verification, crash-cause capture, alert throttling,
+- [x] Exercise Telegram verification, crash-cause capture, alert throttling,
       HTTP 500 detection, runtime failover, and no-standby recovery on staging.
-- [ ] Re-run the production dry-run and stop for explicit rollout approval.
+- [x] Re-run the production dry-run and stop for explicit rollout approval.
 
 ## Residual limitations
 
