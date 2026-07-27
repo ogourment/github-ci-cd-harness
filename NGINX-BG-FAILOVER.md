@@ -1,6 +1,7 @@
 # Plan: bounded same-host failover for blue/green Phoenix
 
-Status: **implemented; Agile-U staging live validation in progress.**
+Status: **implemented and live-validated on Agile-U staging; production rollout
+pending.**
 
 ## Goal
 
@@ -119,10 +120,10 @@ orchestration and contract validation.
       never becomes the committed live color.
 - [x] A public smoke response must be 2xx HTML and the public readiness response
       must identify the candidate release, pipeline, and color.
-- [ ] After a successful deploy, stopping the live Phoenix service during the
+- [x] After a successful deploy, stopping the live Phoenix service during the
       standby window causes new HTTP requests to reach the previous color.
 - [x] The standby is removed from NGINX before its service is stopped.
-- [ ] A second deploy or manual rollback cannot let an old timer stop the
+- [x] A second deploy or manual rollback cannot let an old timer stop the
       current live color.
 - [x] With standby disabled, deployment behavior remains unchanged apart from
       proxy correctness and the new public post-cutover verification.
@@ -280,14 +281,14 @@ Tasks:
       500; confirm traffic and `current_color` remain on the previous release.
 - [x] Deploy a healthy fixture; confirm both colors answer independently during
       the standby window.
-- [ ] Stop the live service mid-window while repeatedly requesting the public
+- [x] Stop the live service mid-window while repeatedly requesting the public
       URL; confirm new requests reach the previous color.
 - [x] Confirm the standby timer removes the backup before stopping its service.
-- [ ] Start another deploy during the standby window; confirm the stale timer
+- [x] Start another deploy during the standby window; confirm the stale timer
       cannot affect the new live color.
 - [ ] Confirm CI and host notifications distinguish a rejected candidate from
       a successful cutover.
-- [ ] Confirm the NGINX error log records a stopped primary and sampled response
+- [x] Confirm the NGINX error log records a stopped primary and sampled response
       identity proves that the standby served the subsequent requests.
 
 ## Residual limitations
