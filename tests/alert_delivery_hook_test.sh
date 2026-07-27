@@ -5,6 +5,8 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 acceptance_template="${root}/templates/acceptance.yml"
 cd_template="${root}/templates/cd.yml"
 alert_helper="${root}/scripts/ci_cd_alert_event.sh"
+readme="${root}/README.md"
+version="$(cat "${root}/VERSION")"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -65,6 +67,8 @@ grep -Fq '"$CI_CD_ALERT_ADAPTER" "$event_file"' "$alert_helper"
 grep -Fq '"$alert_helper" acceptance "$alert_event_path"' "$acceptance_template"
 grep -Fq '"$alert_helper" deployment "$alert_event_path"' "$cd_template"
 grep -Fq 'CI_CD_HARNESS_REF is required when CI_CD_ALERT_ADAPTER is set' "$acceptance_template"
+grep -Fq "CI_CD_HARNESS_REF: \"v${version}\"" "$cd_template"
+[[ "$(grep -Fc "ref: v${version}" "$readme")" -eq 2 ]]
 grep -Fq 'ACCEPTANCE_NOTIFY_COMMAND is deprecated; use CI_CD_ALERT_ADAPTER' "$acceptance_template"
 grep -Fq 'elif [ -n "$ACCEPTANCE_NOTIFY_COMMAND" ]' "$acceptance_template"
 grep -Fq 'elif [ -n "${TELEGRAM_BOT_TOKEN:-}" ]' "$acceptance_template"
