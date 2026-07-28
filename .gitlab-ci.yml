@@ -31,11 +31,13 @@ template_smoke:
       END {exit !(opt_in && publish)}' templates/acceptance.yml
     - grep -Fq 'acceptance_report_url="${CI_JOB_URL}/artifacts/file/${ACCEPTANCE_PUBLIC_DIR%/}/index.html"' templates/acceptance.yml
     - sh -n scripts/staging_release_smoke.sh
+    - bash -n scripts/release_tag.sh tests/release_tag_test.sh
     - sh -n scripts/verify_health_identity.sh
     - sh -n scripts/ci_cd_alert_event.sh
     - bash -n scripts/resource_preflight.sh scripts/intensive_command_lock.sh scripts/atdd_remote_copy.sh scripts/atdd_generate_thumbnails.sh \
       ansible/roles/phoenix_blue_green/templates/phoenix_telegram_notify.sh.j2 tests/resource_preflight_test.sh tests/intensive_command_lock_test.sh tests/deployment_metadata_contract_test.sh tests/atdd_remote_copy_test.sh tests/atdd_generate_thumbnails_test.sh tests/telegram_sender_contract_test.sh tests/alert_delivery_hook_test.sh tests/ansible_uploads_contract_test.sh tests/ansible_blue_green_failover_contract_test.sh tests/ansible_blue_green_legacy_contract_test.sh tests/ansible_operational_hardening_contract_test.sh
     - tests/resource_preflight_test.sh
+    - tests/release_tag_test.sh
     - tests/intensive_command_lock_test.sh
     - tests/deployment_metadata_contract_test.sh
     - tests/atdd_remote_copy_test.sh
@@ -98,6 +100,9 @@ notification_proof:
 # This repository releases exactly when its canonical VERSION changes. Keep the
 # shared template manual for consumers that use a different release process.
 release_tag:
+  before_script: []
+  script:
+    - scripts/release_tag.sh publish
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_RELEASE_TAG == "true"'
       changes:

@@ -1,6 +1,6 @@
 variables:
   CI_CD_HARNESS_PROJECT: "olivierg/gitlab-ci-cd-harness"
-  CI_CD_HARNESS_REF: "v0.7.7"
+  CI_CD_HARNESS_REF: "v0.7.8"
   CI_CD_ENABLE_STAGING_DEPLOY: "true"
   CI_CD_ENABLE_PROD_DEPLOY: "false"
   CI_CD_ENABLE_ANSIBLE_DEPLOY_JOBS: "false"
@@ -287,43 +287,19 @@ build_release:
 
 release_tag:
   stage: production
+  needs:
+    - job: deploy_prod
+      artifacts: false
+      optional: true
   before_script:
     - apt-get update -y
     - apt-get install -y --no-install-recommends ca-certificates git
+    - *ci_cd_fetch_harness
   script:
-    - |
-      set -euo pipefail
-
-      : "${CI_CD_RELEASE_VERSION_COMMAND:?CI_CD_RELEASE_VERSION_COMMAND is required}"
-      : "${CI_CD_RELEASE_TAG_PREFIX:=v}"
-
-      version="$(bash -lc "$CI_CD_RELEASE_VERSION_COMMAND")"
-
-      if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-        echo "Release version must be strict SemVer MAJOR.MINOR.PATCH; got: $version" >&2
-        exit 1
-      fi
-
-      tag="${CI_CD_RELEASE_TAG_PREFIX}${version}"
-
-      if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-        echo "Release tag must be strict vMAJOR.MINOR.PATCH; got: $tag" >&2
-        exit 1
-      fi
-
-      git config user.name "${CI_CD_RELEASE_TAGGER_NAME:-GitLab CI release}"
-      git config user.email "${CI_CD_RELEASE_TAGGER_EMAIL:-release@gitlab-ci.invalid}"
-      git remote set-url origin "$CI_REPOSITORY_URL"
-      git fetch --tags origin
-
-      if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-        echo "Release tag already exists: $tag" >&2
-        exit 1
-      fi
-
-      git tag -a "$tag" "$CI_COMMIT_SHA" -m "${CI_CD_RELEASE_TAG_MESSAGE:-Release $tag}"
-      git push origin "refs/tags/$tag"
+    - .gitlab-ci-cd-harness/scripts/release_tag.sh publish
   rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_RELEASE_TAG == "true" && $CI_CD_ENABLE_PROD_DEPLOY == "true"'
+      when: on_success
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_RELEASE_TAG == "true"'
       when: manual
     - when: never
@@ -404,6 +380,12 @@ deploy_prod:
   environment:
     name: production
     url: "$PROD_ENVIRONMENT_URL"
+  script:
+    - |
+      if [[ "$CI_CD_ENABLE_RELEASE_TAG" == "true" ]]; then
+        .gitlab-ci-cd-harness/scripts/release_tag.sh preflight
+      fi
+    - .gitlab-ci-cd-harness/scripts/deploy_release_fast.sh "$CI_CD_DEPLOY_TARGET"
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_CD_ENABLE_PROD_DEPLOY == "true"'
       when: manual

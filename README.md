@@ -52,10 +52,10 @@ Include this repository in consuming pipelines:
 ```yaml
   include:
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.7.7
+    ref: v0.7.8
     file: /templates/acceptance.yml
   - project: olivierg/gitlab-ci-cd-harness
-    ref: v0.7.7
+    ref: v0.7.8
     file: /templates/cd.yml
 ```
 
@@ -135,7 +135,7 @@ never copied into the artifact.
 `templates/cd.yml` defines:
 
 - `build_release`
-- `release_tag` (off by default; manual)
+- `release_tag` (off by default; automatic after an enabled production deploy)
 - `deploy_staging`
 - `staging_release_smoke`
 - `deploy_prod` (off by default)
@@ -145,7 +145,7 @@ never copied into the artifact.
 The job dependency chain encoded by the template is:
 
 ```text
-build_release -> deploy_staging -> staging_release_smoke -> deploy_prod
+build_release -> deploy_staging -> staging_release_smoke -> deploy_prod -> release_tag
                               -> acceptance_evidence -> acceptance_gate -> deploy_prod
 ```
 
@@ -166,11 +166,16 @@ set `CI_CD_ENABLE_STAGING_SMOKE=false`.
 
 ## SemVer release tags
 
-Set `CI_CD_ENABLE_RELEASE_TAG=true` to expose the `release_tag` manual job on
-`main`. It evaluates `CI_CD_RELEASE_VERSION_COMMAND` (by default, the
-`version:` value in `mix.exs`), requires strict `MAJOR.MINOR.PATCH` SemVer, and
-creates an annotated `vMAJOR.MINOR.PATCH` tag at the current pipeline commit.
-It refuses to replace an existing tag.
+Set both `CI_CD_ENABLE_PROD_DEPLOY=true` and `CI_CD_ENABLE_RELEASE_TAG=true` to
+create the annotated `vMAJOR.MINOR.PATCH` tag automatically after a successful
+manual production deployment. Before production changes, `deploy_prod`
+validates the version and refuses to deploy when that tag already identifies a
+different commit. A retry is idempotent when the tag already identifies the
+same commit.
+
+When release tags are enabled without production deploys, `release_tag` remains
+available as a standalone manual job. This supports repositories that publish
+the template itself or use another production delivery mechanism.
 
 The consumer project must enable **Allow Git push requests to the repository**
 for its own CI/CD job tokens. The job token uses the permissions of the person
