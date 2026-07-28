@@ -18,6 +18,9 @@ variables:
 
 template_smoke:
   stage: build
+  before_script:
+    - apt-get update -y
+    - apt-get install -y --no-install-recommends git
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG'
   script:
@@ -100,7 +103,9 @@ notification_proof:
 # This repository releases exactly when its canonical VERSION changes. Keep the
 # shared template manual for consumers that use a different release process.
 release_tag:
-  before_script: []
+  before_script:
+    - apt-get update -y
+    - apt-get install -y --no-install-recommends git
   script:
     - scripts/release_tag.sh publish
   rules:
