@@ -1,7 +1,7 @@
 # AGENTS.md
 
-Guidance for agents working in the `gitlab-ci-cd-harness` repository (the shared
-GitLab CI/CD templates, deploy/verify scripts, and Ansible for consumer projects).
+Guidance for agents working in the `github-ci-cd-harness` repository (the shared
+GitHub Actions workflows, deploy/verify scripts, and Ansible for consumer projects).
 
 See `README.md` for the template overview and consumer integration recipes.
 

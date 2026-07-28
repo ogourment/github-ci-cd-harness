@@ -1,6 +1,43 @@
-# gitlab-ci-cd-harness
+# github-ci-cd-harness
 
-Reusable GitLab CI/CD templates and recipes for Phoenix/Elixir delivery pipelines.
+Reusable GitHub Actions workflows, deployment scripts, and Ansible roles for
+Phoenix/Elixir delivery pipelines.
+
+This project is the GitHub-native continuation of
+[`gitlab-ci-cd-harness`](https://framagit.org/olivierg/gitlab-ci-cd-harness).
+Its complete upstream history is retained. The existing GitLab templates remain
+available during the migration, while new consumers should use the reusable
+workflows under `.github/workflows`.
+
+## GitHub reusable workflows
+
+Call the Phoenix workflow from a consumer:
+
+```yaml
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  phoenix:
+    uses: ogourment/github-ci-cd-harness/.github/workflows/phoenix.yml@main
+```
+
+The initial workflow runs formatting, warnings-as-errors compilation, tests
+against PostgreSQL 18, and a production asset build. Release tags will replace
+`@main` as the stable interface once the GitHub port has its first release.
+
+Ansible consumers can call `.github/workflows/ansible.yml`, specifying their
+playbook, inventory, and optional requirements file. It performs lint and
+syntax validation only; it never provisions a host.
+
+See [`MIGRATION.md`](MIGRATION.md) for the current porting boundary.
 
 ## Local resource preflight
 

@@ -1,0 +1,58 @@
+name: Reusable Phoenix CI
+
+on:
+  workflow_call:
+    inputs:
+      elixir-version:
+        description: Elixir version
+        type: string
+        default: "1.20.2"
+      otp-version:
+        description: Erlang/OTP version
+        type: string
+        default: "29.0.3"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.4-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: erlef/setup-beam@v1.24.1
+        with:
+          elixir-version: ${{ inputs.elixir-version }}
+          otp-version: ${{ inputs.otp-version }}
+      - name: Install Hex and Rebar
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+      - name: Fetch dependencies
+        run: mix deps.get
+      - name: Check formatting
+        run: mix format --check-formatted
+      - name: Compile without warnings
+        run: mix compile --warnings-as-errors
+      - name: Run tests
+        run: mix test
+      - name: Build production assets
+        env:
+          MIX_ENV: prod
+        run: mix assets.deploy

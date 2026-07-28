@@ -1,0 +1,20 @@
+name: Harness tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  shell-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run shell contract tests
+        run: |
+          for test_file in tests/*_test.sh; do
+            "$test_file"
+          done
