@@ -78,6 +78,7 @@ jobs:
         if: ${{ inputs.run-acceptance }}
         env:
           ATDD: "true"
+          PHX_SERVER: "true"
         run: mix test.atdd
       - name: Upload acceptance evidence
         if: ${{ always() && inputs.run-acceptance }}
