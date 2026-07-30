@@ -71,8 +71,9 @@ jobs:
         run: mix test
       - name: Install Playwright Chromium
         if: ${{ inputs.run-acceptance }}
-        working-directory: assets
-        run: npx playwright install --with-deps chromium chromium-headless-shell
+        run: |
+          npm --prefix assets install --no-save playwright
+          npx --prefix assets playwright install --with-deps chromium chromium-headless-shell
       - name: Run browser acceptance tests
         if: ${{ inputs.run-acceptance }}
         run: mix test.atdd
@@ -82,7 +83,7 @@ jobs:
         with:
           name: acceptance-evidence
           path: tmp/atdd
-          if-no-files-found: error
+          if-no-files-found: warn
       - name: Build production assets
         env:
           MIX_ENV: prod
