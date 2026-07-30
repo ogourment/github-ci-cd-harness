@@ -29,9 +29,28 @@ jobs:
     uses: ogourment/github-ci-cd-harness/.github/workflows/phoenix.yml@main
 ```
 
-The initial workflow runs formatting, warnings-as-errors compilation, tests
-against PostgreSQL 18, and a production asset build. Release tags will replace
-`@main` as the stable interface once the GitHub port has its first release.
+The workflow runs formatting, warnings-as-errors compilation, tests against
+PostgreSQL 18, and a production asset build. Consumers can additionally enable
+browser acceptance evidence and an OTP release artifact:
+
+```yaml
+jobs:
+  phoenix:
+    uses: ogourment/github-ci-cd-harness/.github/workflows/phoenix.yml@main
+    with:
+      run-acceptance: true
+      build-release: true
+      release-artifact-name: my-app-release
+    secrets:
+      acceptance-harness-token: ${{ secrets.ACCEPTANCE_HARNESS_TOKEN }}
+```
+
+`run-acceptance` installs Playwright Chromium, runs the consumer-owned
+`mix test.atdd` alias, and uploads `tmp/atdd` even when the acceptance job
+fails. `build-release` runs `mix release --overwrite` after the production
+asset build and uploads the resulting OTP release. Both options default to
+false, preserving existing consumers. Release tags will replace `@main` as the
+stable interface once the GitHub port has its first release.
 
 Ansible consumers can call `.github/workflows/ansible.yml`, specifying their
 playbook, inventory, and optional requirements file. It performs lint and

@@ -3,6 +3,8 @@
 ## Available now
 
 - reusable Phoenix CI with PostgreSQL;
+- optional Playwright acceptance execution with retained evidence artifacts;
+- optional production OTP release artifacts;
 - reusable Ansible lint and syntax validation;
 - all upstream shell tests and deployment helpers;
 - the upstream Ansible roles;
@@ -22,9 +24,8 @@ environment semantics.
 
 ## Planned GitHub interfaces
 
-1. build and retain an OTP release artifact;
-2. deploy staging with GitHub environment protection and concurrency;
-3. run browser smoke and acceptance evidence;
-4. require explicit production approval;
-5. promote the exact tested artifact;
-6. create an idempotent release tag and GitHub Release.
+1. deploy staging with GitHub environment protection and concurrency;
+2. run post-deploy browser smoke against the staging artifact;
+3. require explicit production approval;
+4. promote the exact tested artifact;
+5. create an idempotent release tag and GitHub Release.

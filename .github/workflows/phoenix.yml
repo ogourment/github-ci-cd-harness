@@ -11,6 +11,22 @@ on:
         description: Erlang/OTP version
         type: string
         default: "29.0.3"
+      run-acceptance:
+        description: Run the consumer's mix test.atdd alias and retain evidence
+        type: boolean
+        default: false
+      build-release:
+        description: Build and retain a production OTP release
+        type: boolean
+        default: false
+      release-artifact-name:
+        description: GitHub Actions artifact name for the OTP release
+        type: string
+        default: phoenix-release
+    secrets:
+      acceptance-harness-token:
+        description: Optional Framagit token for the private acceptance_harness dependency
+        required: false
 
 permissions:
   contents: read
@@ -34,6 +50,7 @@ jobs:
           --health-retries 5
     env:
       MIX_ENV: test
+      ACCEPTANCE_HARNESS_TOKEN: ${{ secrets.acceptance-harness-token }}
     steps:
       - uses: actions/checkout@v6
       - uses: erlef/setup-beam@v1.24.1
@@ -52,7 +69,33 @@ jobs:
         run: mix compile --warnings-as-errors
       - name: Run tests
         run: mix test
+      - name: Install Playwright Chromium
+        if: ${{ inputs.run-acceptance }}
+        working-directory: assets
+        run: npx playwright install --with-deps chromium chromium-headless-shell
+      - name: Run browser acceptance tests
+        if: ${{ inputs.run-acceptance }}
+        run: mix test.atdd
+      - name: Upload acceptance evidence
+        if: ${{ always() && inputs.run-acceptance }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-evidence
+          path: tmp/atdd
+          if-no-files-found: error
       - name: Build production assets
         env:
           MIX_ENV: prod
         run: mix assets.deploy
+      - name: Build production release
+        if: ${{ inputs.build-release }}
+        env:
+          MIX_ENV: prod
+        run: mix release --overwrite
+      - name: Upload production release
+        if: ${{ inputs.build-release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.release-artifact-name }}
+          path: _build/prod/rel/*
+          if-no-files-found: error
