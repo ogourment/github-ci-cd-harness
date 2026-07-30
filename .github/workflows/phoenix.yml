@@ -76,6 +76,8 @@ jobs:
           npx --prefix assets playwright install --with-deps chromium chromium-headless-shell
       - name: Run browser acceptance tests
         if: ${{ inputs.run-acceptance }}
+        env:
+          ATDD: "true"
         run: mix test.atdd
       - name: Upload acceptance evidence
         if: ${{ always() && inputs.run-acceptance }}
