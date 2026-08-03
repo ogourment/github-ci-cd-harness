@@ -209,6 +209,13 @@ Production deploys remain optional. Set `CI_CD_ENABLE_PROD_DEPLOY=true` in a
 consumer to expose the manual production deploy job. Optional manual deploy
 jobs are non-blocking, so a green pipeline stays green when they are not run.
 
+## Environment badging
+
+Non-production deployments should say so. See
+[`docs/environment_badging.md`](docs/environment_badging.md) for the logo
+sticker, the per-environment favicon and its cache-busting trap, and the
+`X-Robots-Tag` the `web` role emits when `app_is_production` is false.
+
 ## Staging browser smoke
 
 `staging_release_smoke` is enabled by default for a staging deployment. It
