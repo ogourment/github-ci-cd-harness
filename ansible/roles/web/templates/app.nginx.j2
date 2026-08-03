@@ -19,6 +19,12 @@ server {
         alias {{ nginx_uploads_dir }}/;
         autoindex off;
         add_header X-Content-Type-Options nosniff always;
+{% if not app_is_production | default(true) %}
+        # A review environment on a real domain can outrank the site it is a
+        # copy of. Applied at the edge so it covers every response, not only
+        # the HTML pages an application remembers to tag.
+        add_header X-Robots-Tag "noindex, nofollow" always;
+{% endif %}
         limit_except GET HEAD { deny all; }
     }
     {% endif %}
@@ -131,6 +137,12 @@ server {
         alias {{ nginx_uploads_dir }}/;
         autoindex off;
         add_header X-Content-Type-Options nosniff always;
+{% if not app_is_production | default(true) %}
+        # A review environment on a real domain can outrank the site it is a
+        # copy of. Applied at the edge so it covers every response, not only
+        # the HTML pages an application remembers to tag.
+        add_header X-Robots-Tag "noindex, nofollow" always;
+{% endif %}
         limit_except GET HEAD { deny all; }
     }
     {% endif %}
