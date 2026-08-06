@@ -41,6 +41,7 @@ jobs:
       run-acceptance: true
       build-release: true
       release-artifact-name: my-app-release
+      test-command: mix ci.test
     secrets:
       acceptance-harness-token: ${{ secrets.ACCEPTANCE_HARNESS_TOKEN }}
 ```
@@ -48,9 +49,50 @@ jobs:
 `run-acceptance` installs Playwright Chromium, runs the consumer-owned
 `mix test.atdd` alias, and uploads `tmp/atdd` even when the acceptance job
 fails. `build-release` runs `mix release --overwrite` after the production
-asset build and uploads the resulting OTP release. Both options default to
-false, preserving existing consumers. Release tags will replace `@main` as the
-stable interface once the GitHub port has its first release.
+asset build and uploads the resulting OTP release together with immutable
+`RELEASE_ID` and `VERSION` metadata. Both options default to false, preserving
+existing consumers.
+`test-command` lets a consumer route CI through its stricter project-owned
+quality alias (for example catalog extraction and translation checks) while
+defaulting to `mix test` for compatibility.
+
+Applications with a provisioned blue/green host can chain the reusable
+delivery workflow after `phoenix`. It downloads that exact artifact, deploys
+staging automatically, checks both health identity and the public HTML page,
+then optionally enters the protected `production` environment. A successful
+production deployment publishes the annotated SemVer tag for the deployed
+commit:
+
+```yaml
+  delivery:
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    needs: phoenix
+    uses: ogourment/github-ci-cd-harness/.github/workflows/phoenix-delivery.yml@main
+    with:
+      artifact-name: my-app-release
+      otp-app: my_app
+      remote-env-prefix: MY_APP
+      deploy-production: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy-production }}
+      staging-environment-url: https://staging.example.org
+      production-environment-url: https://example.org
+    secrets:
+      staging-host: ${{ secrets.STAGING_HOST }}
+      staging-ssh-user: ${{ secrets.STAGING_SSH_USER }}
+      staging-ssh-private-key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+      staging-ssh-known-hosts: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+      staging-remote-deploy-script: ${{ secrets.STAGING_REMOTE_DEPLOY_SCRIPT }}
+      production-host: ${{ secrets.PRODUCTION_HOST }}
+      production-ssh-user: ${{ secrets.PRODUCTION_SSH_USER }}
+      production-ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+      production-ssh-known-hosts: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+      production-remote-deploy-script: ${{ secrets.PRODUCTION_REMOTE_DEPLOY_SCRIPT }}
+```
+
+Configure the GitHub `production` environment with required reviewers. Pull
+requests never call delivery, and production remains false unless the consumer
+explicitly exposes and passes a manual dispatch input. Release tags will
+replace `@main` as the stable workflow interface once the GitHub port has its
+first release.
 
 Ansible consumers can call `.github/workflows/ansible.yml`, specifying their
 playbook, inventory, and optional requirements file. It performs lint and

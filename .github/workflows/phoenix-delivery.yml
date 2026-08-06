@@ -1,0 +1,158 @@
+name: Reusable Phoenix delivery
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        type: string
+        default: phoenix-release
+      otp-app:
+        type: string
+        required: true
+      remote-env-prefix:
+        type: string
+        required: true
+      deploy-staging:
+        type: boolean
+        default: true
+      deploy-production:
+        type: boolean
+        default: false
+      release-version-command:
+        type: string
+        default: "cat _build/VERSION"
+      staging-environment-url:
+        type: string
+        required: true
+      production-environment-url:
+        type: string
+        required: true
+    secrets:
+      staging-host:
+        required: true
+      staging-ssh-host:
+        required: false
+      staging-ssh-user:
+        required: true
+      staging-ssh-private-key:
+        required: true
+      staging-ssh-known-hosts:
+        required: true
+      staging-remote-deploy-script:
+        required: true
+      production-host:
+        required: true
+      production-ssh-host:
+        required: false
+      production-ssh-user:
+        required: true
+      production-ssh-private-key:
+        required: true
+      production-ssh-known-hosts:
+        required: true
+      production-remote-deploy-script:
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  deploy_staging:
+    if: ${{ inputs.deploy-staging && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: ${{ inputs.staging-environment-url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+        with:
+          repository: ogourment/github-ci-cd-harness
+          path: .gitlab-ci-cd-harness
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: _build
+      - name: Deploy the verified release to staging
+        env:
+          CI_CD_OTP_APP: ${{ inputs.otp-app }}
+          CI_CD_DEPLOY_HOST: ${{ secrets.staging-host }}
+          CI_CD_DEPLOY_SSH_HOST: ${{ secrets.staging-ssh-host }}
+          CI_CD_DEPLOY_SSH_USER: ${{ secrets.staging-ssh-user }}
+          CI_CD_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.staging-ssh-private-key }}
+          CI_CD_DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.staging-ssh-known-hosts }}
+          CI_CD_REMOTE_DEPLOY_SCRIPT: ${{ secrets.staging-remote-deploy-script }}
+          CI_CD_REMOTE_ENV_PREFIX: ${{ inputs.remote-env-prefix }}
+          CI_CD_RELEASE_ARTIFACT_PATH: _build/prod/rel/${{ inputs.otp-app }}
+          CI_CD_HEALTH_URL: ${{ inputs.staging-environment-url }}/health
+          CI_COMMIT_SHA: ${{ github.sha }}
+          CI_COMMIT_REF_NAME: ${{ github.ref_name }}
+          CI_PIPELINE_ID: ${{ github.run_id }}
+          CI_PIPELINE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GITLAB_USER_LOGIN: ${{ github.actor }}
+        run: .gitlab-ci-cd-harness/scripts/deploy_release_fast.sh staging
+      - name: Verify deployed release identity
+        env:
+          CI_CD_STAGING_SMOKE_URL: ${{ inputs.staging-environment-url }}/
+        run: .gitlab-ci-cd-harness/scripts/staging_release_smoke.sh
+
+  deploy_production:
+    if: ${{ inputs.deploy-production && github.ref == 'refs/heads/main' }}
+    needs: deploy_staging
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ inputs.production-environment-url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+        with:
+          repository: ogourment/github-ci-cd-harness
+          path: .gitlab-ci-cd-harness
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: _build
+      - name: Deploy the staging-verified release to production
+        env:
+          CI_CD_OTP_APP: ${{ inputs.otp-app }}
+          CI_CD_DEPLOY_HOST: ${{ secrets.production-host }}
+          CI_CD_DEPLOY_SSH_HOST: ${{ secrets.production-ssh-host }}
+          CI_CD_DEPLOY_SSH_USER: ${{ secrets.production-ssh-user }}
+          CI_CD_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.production-ssh-private-key }}
+          CI_CD_DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.production-ssh-known-hosts }}
+          CI_CD_REMOTE_DEPLOY_SCRIPT: ${{ secrets.production-remote-deploy-script }}
+          CI_CD_REMOTE_ENV_PREFIX: ${{ inputs.remote-env-prefix }}
+          CI_CD_RELEASE_ARTIFACT_PATH: _build/prod/rel/${{ inputs.otp-app }}
+          CI_CD_HEALTH_URL: ${{ inputs.production-environment-url }}/health
+          CI_COMMIT_SHA: ${{ github.sha }}
+          CI_COMMIT_REF_NAME: ${{ github.ref_name }}
+          CI_PIPELINE_ID: ${{ github.run_id }}
+          CI_PIPELINE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GITLAB_USER_LOGIN: ${{ github.actor }}
+        run: .gitlab-ci-cd-harness/scripts/deploy_release_fast.sh production
+
+  release_tag:
+    if: ${{ inputs.deploy-production && github.ref == 'refs/heads/main' }}
+    needs: deploy_production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v6
+        with:
+          repository: ogourment/github-ci-cd-harness
+          path: .gitlab-ci-cd-harness
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: _build
+      - name: Tag the successfully deployed release
+        env:
+          CI_CD_RELEASE_VERSION_COMMAND: ${{ inputs.release-version-command }}
+          CI_COMMIT_SHA: ${{ github.sha }}
+          CI_REPOSITORY_URL: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+          CI_CD_RELEASE_TAGGER_NAME: GitHub Actions release
+          CI_CD_RELEASE_TAGGER_EMAIL: release@github-actions.invalid
+        run: .gitlab-ci-cd-harness/scripts/release_tag.sh publish
