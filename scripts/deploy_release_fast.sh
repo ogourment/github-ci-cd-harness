@@ -23,7 +23,13 @@ remote_env_prefix="${CI_CD_REMOTE_ENV_PREFIX:-$(printf '%s' "$CI_CD_OTP_APP" | t
 install -m 700 -d ~/.ssh
 printf '%s\n' "$CI_CD_DEPLOY_SSH_PRIVATE_KEY" > ~/.ssh/gitlab_ci_cd_deploy_key
 chmod 600 ~/.ssh/gitlab_ci_cd_deploy_key
-ssh-keyscan -H "$CI_CD_DEPLOY_SSH_HOST" >> ~/.ssh/known_hosts
+if [ -n "${CI_CD_DEPLOY_SSH_KNOWN_HOSTS:-}" ]; then
+  printf '%s\n' "$CI_CD_DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+else
+  echo "WARNING: trusting the deploy host key discovered at runtime; configure CI_CD_DEPLOY_SSH_KNOWN_HOSTS" >&2
+  ssh-keyscan -H "$CI_CD_DEPLOY_SSH_HOST" > ~/.ssh/known_hosts
+fi
+chmod 600 ~/.ssh/known_hosts
 
 ssh_opts=(
   -i "$HOME/.ssh/gitlab_ci_cd_deploy_key"

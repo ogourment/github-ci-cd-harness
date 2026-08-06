@@ -23,6 +23,10 @@ on:
         description: GitHub Actions artifact name for the OTP release
         type: string
         default: phoenix-release
+      release-id-prefix:
+        description: Prefix used for immutable deployment release identifiers
+        type: string
+        default: phoenix
     secrets:
       acceptance-harness-token:
         description: Optional Framagit token for the private acceptance_harness dependency
@@ -95,10 +99,22 @@ jobs:
         env:
           MIX_ENV: prod
         run: mix release --overwrite
+      - name: Record release identity
+        if: ${{ inputs.build-release }}
+        env:
+          RELEASE_ID_PREFIX: ${{ inputs.release-id-prefix }}
+        run: |
+          version="$(MIX_ENV=prod mix run --no-start -e 'IO.write(Mix.Project.config()[:version])')"
+          mkdir -p _build
+          printf '%s\n' "$version" > _build/VERSION
+          printf '%s-%s-%s\n' "$RELEASE_ID_PREFIX" "$version" "$GITHUB_RUN_ID" > _build/RELEASE_ID
       - name: Upload production release
         if: ${{ inputs.build-release }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.release-artifact-name }}
-          path: _build/prod/rel/*
+          path: |
+            _build/RELEASE_ID
+            _build/VERSION
+            _build/prod/rel/*
           if-no-files-found: error
