@@ -112,6 +112,9 @@ jobs:
           mkdir -p _build
           printf '%s\n' "$version" > _build/VERSION
           printf '%s-%s-%s\n' "$RELEASE_ID_PREFIX" "$version" "$GITHUB_RUN_ID" > _build/RELEASE_ID
+      - name: Archive production release with Unix permissions
+        if: ${{ inputs.build-release }}
+        run: tar -C _build/prod/rel -czf _build/release.tar.gz .
       - name: Upload production release
         if: ${{ inputs.build-release }}
         uses: actions/upload-artifact@v4
@@ -120,5 +123,5 @@ jobs:
           path: |
             _build/RELEASE_ID
             _build/VERSION
-            _build/prod/rel/*
+            _build/release.tar.gz
           if-no-files-found: error
