@@ -108,7 +108,7 @@ jobs:
         env:
           RELEASE_ID_PREFIX: ${{ inputs.release-id-prefix }}
         run: |
-          version="$(MIX_ENV=prod mix run --no-start -e 'IO.write(Mix.Project.config()[:version])')"
+          version="$(mix run --no-start -e 'IO.write(Mix.Project.config()[:version])')"
           mkdir -p _build
           printf '%s\n' "$version" > _build/VERSION
           printf '%s-%s-%s\n' "$RELEASE_ID_PREFIX" "$version" "$GITHUB_RUN_ID" > _build/RELEASE_ID
