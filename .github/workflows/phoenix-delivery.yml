@@ -98,7 +98,7 @@ jobs:
       - name: Verify deployed release identity
         env:
           CI_CD_STAGING_SMOKE_URL: ${{ inputs.staging-environment-url }}/
-        run: .gitlab-ci-cd-harness/scripts/staging_release_smoke.sh
+        run: bash .gitlab-ci-cd-harness/scripts/staging_release_smoke.sh
 
   deploy_production:
     if: ${{ inputs.deploy-production && github.ref == 'refs/heads/main' }}

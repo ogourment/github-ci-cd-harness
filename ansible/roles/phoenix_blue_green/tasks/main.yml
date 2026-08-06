@@ -33,6 +33,15 @@
     group: "{{ deploy_user }}"
     mode: "0755"
 
+- name: Ensure deployment history directory exists
+  ansible.builtin.file:
+    path: "{{ deployment_history_path | dirname }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0750"
+  when: deployment_history_path | length > 0
+
 - name: Validate optional uploads configuration
   ansible.builtin.assert:
     that:
