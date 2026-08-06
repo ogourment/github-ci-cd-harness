@@ -27,6 +27,10 @@ on:
         description: Prefix used for immutable deployment release identifiers
         type: string
         default: phoenix
+      test-command:
+        description: Consumer test/quality command
+        type: string
+        default: mix test
     secrets:
       acceptance-harness-token:
         description: Optional Framagit token for the private acceptance_harness dependency
@@ -72,7 +76,7 @@ jobs:
       - name: Compile without warnings
         run: mix compile --warnings-as-errors
       - name: Run tests
-        run: mix test
+        run: ${{ inputs.test-command }}
       - name: Install Playwright Chromium
         if: ${{ inputs.run-acceptance }}
         run: |

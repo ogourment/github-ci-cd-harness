@@ -41,6 +41,7 @@ jobs:
       run-acceptance: true
       build-release: true
       release-artifact-name: my-app-release
+      test-command: mix ci.test
     secrets:
       acceptance-harness-token: ${{ secrets.ACCEPTANCE_HARNESS_TOKEN }}
 ```
@@ -51,6 +52,9 @@ fails. `build-release` runs `mix release --overwrite` after the production
 asset build and uploads the resulting OTP release together with immutable
 `RELEASE_ID` and `VERSION` metadata. Both options default to false, preserving
 existing consumers.
+`test-command` lets a consumer route CI through its stricter project-owned
+quality alias (for example catalog extraction and translation checks) while
+defaulting to `mix test` for compatibility.
 
 Applications with a provisioned blue/green host can chain the reusable
 delivery workflow after `phoenix`. It downloads that exact artifact, deploys

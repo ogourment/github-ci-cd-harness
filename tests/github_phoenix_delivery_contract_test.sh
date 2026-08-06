@@ -14,6 +14,7 @@ grep -Fq 'needs: deploy_production' "$workflow"
 grep -Fq 'scripts/release_tag.sh publish' "$workflow"
 grep -Fq '_build/RELEASE_ID' "$ci_workflow"
 grep -Fq '_build/VERSION' "$ci_workflow"
+grep -Fq 'run: ${{ inputs.test-command }}' "$ci_workflow"
 grep -Fq 'staging-ssh-known-hosts:' "$workflow"
 grep -Fq 'CI_CD_DEPLOY_SSH_KNOWN_HOSTS' "$deploy_script"
 
