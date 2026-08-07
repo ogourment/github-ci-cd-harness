@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Bootstrap for private dependency access.
+#
+# This is the one piece that cannot live in the harness package: it installs the
+# SSH keys that let `mix deps.get` reach private dependencies, and so must run
+# before the package itself can be fetched. Applications keep a copy and invoke
+# it as their first CI step.
+set -euo pipefail
+
+install -d -m 0700 "${HOME}/.ssh"
+
+# Framagit hosts acceptance_harness; git.agile-u.com hosts ci_cd_harness.
+if [[ -n "${FRAMAGIT_DEPLOY_KEY:-}" ]]; then
+  printf '%s\n' "${FRAMAGIT_DEPLOY_KEY}" >"${HOME}/.ssh/framagit-ci"
+  chmod 0600 "${HOME}/.ssh/framagit-ci"
+fi
+
+if [[ -n "${FORGEJO_DEPLOY_KEY:-}" ]]; then
+  printf '%s\n' "${FORGEJO_DEPLOY_KEY}" >"${HOME}/.ssh/forgejo-ci"
+  chmod 0600 "${HOME}/.ssh/forgejo-ci"
+fi
+
+: "${CI_KNOWN_HOSTS:?CI_KNOWN_HOSTS is required}"
+printf '%s\n' "${CI_KNOWN_HOSTS}" >"${HOME}/.ssh/known_hosts"
+chmod 0600 "${HOME}/.ssh/known_hosts"
+
+# Hardened hosts set MaxAuthTries 3; pin identities so the right key is offered
+# first rather than being cut off behind unrelated agent keys.
+cat >"${HOME}/.ssh/config" <<'CONFIG'
+Host framagit.org
+  IdentityFile ~/.ssh/framagit-ci
+  IdentitiesOnly yes
+  IdentityAgent none
+
+Host git.agile-u.com
+  IdentityFile ~/.ssh/forgejo-ci
+  IdentitiesOnly yes
+  IdentityAgent none
+CONFIG
+chmod 0600 "${HOME}/.ssh/config"
+
+mix local.hex --force
+mix local.rebar --force
+mix deps.get
