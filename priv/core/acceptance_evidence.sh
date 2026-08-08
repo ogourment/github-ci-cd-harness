@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+# Acceptance evidence: run the acceptance suite, build the evidence site,
+# evaluate the gate, and write the notification message.
+#
+# Extracted from the GitLab acceptance template so both forges run identical
+# logic. The one forge-specific input is ACCEPTANCE_REPORT_URL, which the caller
+# supplies because each forge addresses run artifacts differently.
+#
+# Evidence is produced even when scenarios fail: the gate is evaluated
+# separately, so a failing suite still publishes what it observed.
+set -euo pipefail
+: "${ACCEPTANCE_APP_NAME:=${CI_PROJECT_NAME:-project}}"
+: "${ACCEPTANCE_TEST_COMMAND:=mix test.atdd}"
+: "${ACCEPTANCE_MIX_ENV:=test}"
+: "${ACCEPTANCE_EVIDENCE_DIR:=tmp/atdd}"
+: "${ACCEPTANCE_PUBLIC_DIR:=public}"
+: "${ACCEPTANCE_SITE_TIMEOUT_SECONDS:=90}"
+: "${ACCEPTANCE_FORCE_FAILURE:=false}"
+: "${ACCEPTANCE_FORCE_FAILURE_CODE:=42}"
+: "${ACCEPTANCE_TELEGRAM_MESSAGE_PATH:=acceptance_summary.txt}"
+
+acceptance_message_path="${ACCEPTANCE_EVIDENCE_DIR%/}/${ACCEPTANCE_TELEGRAM_MESSAGE_PATH}"
+mkdir -p "$ACCEPTANCE_EVIDENCE_DIR" "$ACCEPTANCE_PUBLIC_DIR" tmp/ci
+acceptance_test_log="tmp/ci/acceptance_test.log"
+export ATDD_JOB_STARTED_AT="$(date +%s)"
+
+set +e
+bash -lc "$ACCEPTANCE_TEST_COMMAND" 2>&1 | tee "$acceptance_test_log"
+ACCEPTANCE_TEST_EXIT_CODE="${PIPESTATUS[0]:-1}"
+set -e
+
+mkdir -p "$ACCEPTANCE_EVIDENCE_DIR"
+cp "$acceptance_test_log" "$ACCEPTANCE_EVIDENCE_DIR/test.log"
+
+if [ "${ACCEPTANCE_FORCE_FAILURE}" = "true" ]; then
+  ACCEPTANCE_TEST_EXIT_CODE="${ACCEPTANCE_FORCE_FAILURE_CODE}"
+fi
+
+printf 'ATDD_TEST_EXIT_CODE=%s\n' "$ACCEPTANCE_TEST_EXIT_CODE" > "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+printf 'ACCEPTANCE_TELEGRAM_MESSAGE_PATH=%s\n' "$ACCEPTANCE_TELEGRAM_MESSAGE_PATH" >> "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+
+if [ ! -f "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" ]; then
+  printf '# Acceptance evidence\n\nAcceptance tests exited before evidence report was created.\n' > "$ACCEPTANCE_EVIDENCE_DIR/e2e.md"
+fi
+
+if [ "$ACCEPTANCE_TEST_EXIT_CODE" -ne 0 ]; then
+  MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.append_failures "$acceptance_test_log" \
+    "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" "$ACCEPTANCE_EVIDENCE_DIR/failure_count.txt" "$ACCEPTANCE_EVIDENCE_DIR/failure_previews.json" || \
+  MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.append_failures "$acceptance_test_log" \
+    "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt" || true
+fi
+
+acceptance_site_log="$ACCEPTANCE_EVIDENCE_DIR/site_build.log"
+echo "===== acceptance.site (timeout: ${ACCEPTANCE_SITE_TIMEOUT_SECONDS}s) ====="
+set +e
+timeout -k 10s "$ACCEPTANCE_SITE_TIMEOUT_SECONDS" env MIX_ENV="$ACCEPTANCE_MIX_ENV" \
+  mix acceptance.site "$ACCEPTANCE_EVIDENCE_DIR" "$ACCEPTANCE_PUBLIC_DIR" 2>&1 | tee "$acceptance_site_log"
+ACCEPTANCE_SITE_EXIT_CODE="${PIPESTATUS[0]:-1}"
+set -e
+printf 'ACCEPTANCE_SITE_EXIT_CODE=%s\n' "$ACCEPTANCE_SITE_EXIT_CODE" >> "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+
+if [ "$ACCEPTANCE_SITE_EXIT_CODE" -ne 0 ]; then
+  echo "acceptance.site failed with exit code $ACCEPTANCE_SITE_EXIT_CODE; see $acceptance_site_log"
+  cat "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+  find "$ACCEPTANCE_EVIDENCE_DIR" -maxdepth 3 -type f | sort
+  exit "$ACCEPTANCE_SITE_EXIT_CODE"
+fi
+
+set +e
+MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.gate "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" \
+  > "$ACCEPTANCE_EVIDENCE_DIR/gate_check.txt" 2>&1
+ACCEPTANCE_GATE_EXIT_CODE="$?"
+set -e
+printf 'ATDD_GATE_EXIT_CODE=%s\n' "$ACCEPTANCE_GATE_EXIT_CODE" >> "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+
+atdd_elapsed_seconds="$(( $(date +%s) - ATDD_JOB_STARTED_AT ))"
+atdd_minutes="$(( atdd_elapsed_seconds / 60 ))"
+atdd_seconds="$(( atdd_elapsed_seconds % 60 ))"
+
+atdd_scenarios=$(grep -E '^\|[[:space:]]*[0-9]+[[:space:]]*\|' "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" | wc -l || true)
+atdd_steps=$(grep -Ec '^###[[:space:]]+' "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" || true)
+atdd_failure_count="0"
+if [ -s "$ACCEPTANCE_EVIDENCE_DIR/failure_count.txt" ]; then
+  atdd_failure_count="$(cat "$ACCEPTANCE_EVIDENCE_DIR/failure_count.txt")"
+elif [ -s "$acceptance_test_log" ]; then
+  atdd_failure_count="$(grep -Eo '[0-9]+ failures?' "$acceptance_test_log" | head -n 1 | sed -E 's/[^0-9]//g' || true)"
+  atdd_failure_count="${atdd_failure_count:-0}"
+fi
+
+atdd_failure_previews=""
+if [ -s "$ACCEPTANCE_EVIDENCE_DIR/failure_previews.json" ]; then
+  atdd_failure_previews="$(MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.failure_previews "$ACCEPTANCE_EVIDENCE_DIR/failure_previews.json" 2>/dev/null || true)"
+fi
+
+if [ "$ACCEPTANCE_TEST_EXIT_CODE" -eq 0 ] && [ "$ACCEPTANCE_SITE_EXIT_CODE" -eq 0 ] && [ "$ACCEPTANCE_GATE_EXIT_CODE" -eq 0 ]; then
+  atdd_status_icon="✅"
+  atdd_status_word="passed"
+else
+  atdd_status_icon="❌"
+  atdd_status_word="failed"
+fi
+
+app_version="${ACCEPTANCE_APP_VERSION:-${ACCEPTANCE_GIT_SHA:-unknown}}"
+if [ -z "${ACCEPTANCE_APP_VERSION:-}" ] && [ -f mix.exs ]; then
+  app_version=$(awk -F'"' '/^[[:space:]]*version:/ { print $2; exit }' mix.exs)
+fi
+app_version="${app_version:-unknown}"
+# The job artifact URL is immutable to this acceptance run. CI_PAGES_URL
+# points at the latest Pages deployment, so storing it would make an old
+# release card silently open a newer report.
+: "${ACCEPTANCE_REPORT_URL:?ACCEPTANCE_REPORT_URL is required; each forge addresses run artifacts differently}"
+acceptance_report_url="${ACCEPTANCE_REPORT_URL}"
+acceptance_report_base_url="${acceptance_report_url%/}"
+acceptance_report_base_url="${acceptance_report_base_url%/index.html}"
+
+acceptance_live_evidence_status="disabled"
+acceptance_live_evidence_url=""
+if [ -n "${ACCEPTANCE_LIVE_EVIDENCE_COMMAND:-}" ]; then
+  acceptance_live_evidence_status="running"
+  export ACCEPTANCE_REPORT_URL="$acceptance_report_url"
+  export ACCEPTANCE_REPORT_BASE_URL="$acceptance_report_base_url"
+  export ACCEPTANCE_EVIDENCE_JSON_PATH="${ACCEPTANCE_EVIDENCE_DIR%/}/evidence.json"
+  acceptance_live_evidence_command="$ACCEPTANCE_LIVE_EVIDENCE_COMMAND"
+  acceptance_live_evidence_command="${acceptance_live_evidence_command//\{\{ACCEPTANCE_REPORT_URL\}\}/$ACCEPTANCE_REPORT_URL}"
+  acceptance_live_evidence_command="${acceptance_live_evidence_command//\{\{ACCEPTANCE_REPORT_BASE_URL\}\}/$ACCEPTANCE_REPORT_BASE_URL}"
+  acceptance_live_evidence_command="${acceptance_live_evidence_command//\{\{ACCEPTANCE_EVIDENCE_JSON_PATH\}\}/$ACCEPTANCE_EVIDENCE_JSON_PATH}"
+
+  set +e
+  acceptance_live_evidence_output="$(bash -lc "$acceptance_live_evidence_command" 2>&1)"
+  acceptance_live_evidence_exit_code="$?"
+  set -e
+
+  if [ "$acceptance_live_evidence_exit_code" -eq 0 ]; then
+    printf '%s\n' "$acceptance_live_evidence_output" |
+      grep '^ACCEPTANCE_METRIC ' \
+        > "${ACCEPTANCE_EVIDENCE_DIR%/}/live_evidence_metrics.log" || true
+    acceptance_live_evidence_url="$(printf '%s\n' "$acceptance_live_evidence_output" | sed '/^[[:space:]]*$/d' | tail -n 1)"
+    if printf '%s' "$acceptance_live_evidence_url" | grep -Eq '^https?://'; then
+      acceptance_live_evidence_status="ok"
+    else
+      acceptance_live_evidence_status="empty"
+      acceptance_live_evidence_url=""
+      {
+        echo "acceptance live evidence command completed but did not print an absolute URL"
+        printf '%s\n' "$acceptance_live_evidence_output"
+      } > "${ACCEPTANCE_EVIDENCE_DIR%/}/live_evidence_error.txt"
+    fi
+  else
+    acceptance_live_evidence_status="failed"
+    {
+      echo "acceptance live evidence command failed with status ${acceptance_live_evidence_exit_code}"
+      printf '%s\n' "$acceptance_live_evidence_output"
+    } > "${ACCEPTANCE_EVIDENCE_DIR%/}/live_evidence_error.txt"
+  fi
+fi
+printf 'ACCEPTANCE_LIVE_EVIDENCE_STATUS=%s\n' "$acceptance_live_evidence_status" >> "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+
+{
+  echo "${atdd_status_icon} <b>[acceptance] ${ACCEPTANCE_APP_NAME} <code>v${app_version}</code> ${atdd_status_word}</b>"
+  echo "Pipeline: <code>${CI_PIPELINE_ID}</code> job <code>${CI_JOB_ID}</code>"
+  echo "Evidence report: <a href=\"${acceptance_report_url}\">open report</a>"
+  if [ -n "$acceptance_live_evidence_url" ]; then
+    echo "Live evidence: <a href=\"${acceptance_live_evidence_url}\">open latest live evidence</a>"
+  fi
+  echo "Evidence: ${atdd_scenarios} scenario(s), ${atdd_steps} step(s)"
+  echo "Exit: test <code>${ACCEPTANCE_TEST_EXIT_CODE}</code>, site <code>${ACCEPTANCE_SITE_EXIT_CODE}</code>, gate <code>${ACCEPTANCE_GATE_EXIT_CODE}</code>, failures <code>${atdd_failure_count}</code>"
+  if [ -n "$atdd_failure_previews" ]; then
+    printf '%s\n' "$atdd_failure_previews"
+  fi
+  echo "Finished in <code>${atdd_minutes}m ${atdd_seconds}s</code>."
+} > "$acceptance_message_path"
+
+if [ "${ACCEPTANCE_TEST_EXIT_CODE}" -ne 0 ] && [ -f "$ACCEPTANCE_EVIDENCE_DIR/gate_check.txt" ]; then
+  gate_summary="$(grep -m 1 '^ATDD gate failure:' "$ACCEPTANCE_EVIDENCE_DIR/gate_check.txt" || true)"
+  if [ -n "$gate_summary" ]; then
+    printf '%s\n' "${gate_summary}" >> "$acceptance_message_path"
+  fi
+fi
+
+cat "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+find "$ACCEPTANCE_EVIDENCE_DIR" -maxdepth 3 -type f | sort
+if [ -n "${ACCEPTANCE_LIVE_EVIDENCE_COMMAND:-}" ] && [ "$acceptance_live_evidence_status" != "ok" ]; then
+  echo "Configured live acceptance evidence was not published: ${acceptance_live_evidence_status}" >&2
+  exit 1
+fi
+

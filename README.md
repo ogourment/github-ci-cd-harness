@@ -24,8 +24,15 @@ once against the normalized answers:
 ```text
 lib/ci_cd_harness.ex          forge detection and normalization
 lib/mix/tasks/cd.*.ex         provider-neutral entry points
+priv/core/                    shared shell, identical on every forge
 priv/forges/forgejo/          adapter scripts, where shell is the right tool
 ```
+
+`priv/core/acceptance_evidence.sh` runs the acceptance suite, builds the
+evidence site, evaluates the gate and writes the notification message. It is the
+GitLab template's logic verbatim, with one input made explicit:
+`ACCEPTANCE_REPORT_URL`, because each forge addresses run artifacts differently.
+Evidence is produced even when scenarios fail — the gate is a separate step.
 
 `CiCdHarness.normalized_env/0` maps Forgejo's GitHub-compatible variables onto
 the `CI_*` names the existing deployment shell already understands. That is the
@@ -35,7 +42,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "git@git.agile-u.com:olivierg/ci-cd-harness.git", tag: "v0.1.0", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "git@git.agile-u.com:olivierg/ci-cd-harness.git", tag: "v0.2.0", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
