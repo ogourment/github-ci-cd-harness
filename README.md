@@ -25,6 +25,7 @@ once against the normalized answers:
 lib/ci_cd_harness.ex          forge detection and normalization
 lib/mix/tasks/cd.*.ex         provider-neutral entry points
 priv/core/                    shared shell, identical on every forge
+                              (delivery, tagging, acceptance, test budgets)
 priv/forges/forgejo/          adapter scripts, where shell is the right tool
 ```
 
@@ -42,7 +43,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "git@git.agile-u.com:olivierg/ci-cd-harness.git", tag: "v0.2.0", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "git@git.agile-u.com:olivierg/ci-cd-harness.git", tag: "v0.3.0", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -62,6 +63,22 @@ and verify so an artifact traces back to the run and commit that produced it.
 cannot arrive *as* this package. Applications keep a copy in their own
 repository and run it as their first CI step; everything after `deps.get` comes
 from here.
+
+## Delivery scripts
+
+`priv/core/` carries the delivery layer: blue/green deploy, health identity
+verification, SemVer tag preflight and publication, acceptance evidence, remote
+evidence copy and evaluation, and the ExUnit budget and value audits.
+
+These previously lived in a repository each consumer cloned at a fixed
+directory name, and referred to each other through that name — so a consumer
+that cloned it elsewhere got a deploy that ran, reported success, and then
+failed on a missing sibling *after* deploying. They now resolve siblings
+relative to themselves, and a test enforces that.
+
+Consuming them through this package also removes a network fetch from every
+job. Cloning them per job made CI depend on a forge that rate-limits SSH, which
+failed builds intermittently.
 
 ## Status
 

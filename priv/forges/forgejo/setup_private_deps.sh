@@ -15,8 +15,8 @@ if [[ -n "${FRAMAGIT_DEPLOY_KEY:-}" ]]; then
   chmod 0600 "${HOME}/.ssh/framagit-ci"
 fi
 
-if [[ -n "${FORGEJO_DEPLOY_KEY:-}" ]]; then
-  printf '%s\n' "${FORGEJO_DEPLOY_KEY}" >"${HOME}/.ssh/forgejo-ci"
+if [[ -n "${FORGE_DEPS_KEY:-}" ]]; then
+  printf '%s\n' "${FORGE_DEPS_KEY}" >"${HOME}/.ssh/forgejo-ci"
   chmod 0600 "${HOME}/.ssh/forgejo-ci"
 fi
 
@@ -41,4 +41,18 @@ chmod 0600 "${HOME}/.ssh/config"
 
 mix local.hex --force
 mix local.rebar --force
-mix deps.get
+
+# Framagit rate-limits SSH and every job in the workflow fetches
+# acceptance_harness from it, so a healthy build fails intermittently with
+# kex_exchange_identification. Retry with backoff. Mirroring the private
+# dependencies onto Forgejo would remove this dependency entirely.
+for attempt in 1 2 3 4 5; do
+  if mix deps.get; then
+    break
+  fi
+  if [ "$attempt" -eq 5 ]; then
+    echo "mix deps.get failed after 5 attempts" >&2
+    exit 1
+  fi
+  sleep $((attempt * 10))
+done
