@@ -12,10 +12,13 @@ defmodule CiCdHarness.CoreScriptsTest do
   @scripts ~w(
     acceptance_evidence.sh
     atdd_remote_copy.sh
+    ci_cd_alert_event.sh
     atdd_remote_eval.sh
     deploy_release_fast.sh
     exunit_test_budget.sh
     exunit_test_value_audit.sh
+    notify_deployment.sh
+    notify_message.sh
     release_tag.sh
     verify_health_identity.sh
   )
