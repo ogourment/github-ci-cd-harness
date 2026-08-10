@@ -17,11 +17,15 @@ defmodule CiCdHarness.CoreScriptsTest do
     deploy_release_fast.sh
     exunit_test_budget.sh
     exunit_test_value_audit.sh
+    exunit_test_value_collect.exs
+    exunit_test_value_report.exs
     notify_deployment.sh
     notify_message.sh
     release_tag.sh
     verify_health_identity.sh
   )
+
+  @shell_scripts Enum.filter(@scripts, &String.ends_with?(&1, ".sh"))
 
   test "every delivery script ships and is executable" do
     for script <- @scripts do
@@ -47,10 +51,36 @@ defmodule CiCdHarness.CoreScriptsTest do
     assert body =~ ~s|"$(dirname "${BASH_SOURCE[0]}")/verify_health_identity.sh"|
   end
 
-  test "every script parses" do
-    for script <- @scripts do
+  test "every shell script parses" do
+    for script <- @shell_scripts do
       {output, status} = System.cmd("bash", ["-n", Path.join(@core, script)], stderr_to_stdout: true)
       assert status == 0, "#{script} does not parse: #{output}"
     end
+  end
+
+  # The audit shipped without the two .exs files it runs, and failed in CI at
+  # the step that needed them. A hand-maintained list cannot catch that, so the
+  # references are read out of the scripts themselves.
+  test "every sibling a script runs is shipped alongside it" do
+    for script <- @shell_scripts, sibling <- siblings_referenced(script) do
+      assert File.exists?(Path.join(@core, sibling)),
+             "#{script} runs #{sibling}, which is not in priv/core"
+    end
+  end
+
+  test "the audit's collection and reporting steps are among those references" do
+    referenced = siblings_referenced("exunit_test_value_audit.sh")
+
+    assert "exunit_test_value_collect.exs" in referenced
+    assert "exunit_test_value_report.exs" in referenced
+  end
+
+  defp siblings_referenced(script) do
+    body = File.read!(Path.join(@core, script))
+
+    ~r/(?:\$script_dir|\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\))\/([A-Za-z0-9_.-]+)/
+    |> Regex.scan(body, capture: :all_but_first)
+    |> Enum.map(&hd/1)
+    |> Enum.uniq()
   end
 end
