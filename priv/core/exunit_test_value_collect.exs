@@ -3,9 +3,14 @@
 defmodule ExUnitTestValueCollect do
   @moduledoc false
 
-  def run([output_dir, max_files_text, include_slow_text]) do
+  # The exclude-tags argument is optional so an older caller keeps working.
+  def run([output_dir, max_files_text, include_slow_text]),
+    do: run([output_dir, max_files_text, include_slow_text, ""])
+
+  def run([output_dir, max_files_text, include_slow_text, exclude_tags_text]) do
     max_files = parse_max_files!(max_files_text)
     include_slow = parse_boolean!(include_slow_text)
+    exclude_tags = parse_tags(exclude_tags_text)
     test_files = test_files!(max_files)
     collection_started = now()
 
@@ -13,6 +18,7 @@ defmodule ExUnitTestValueCollect do
     Code.require_file("test/test_helper.exs")
     ExUnit.configure(autorun: false)
     configure_slow_tests(include_slow)
+    configure_excluded_tags(exclude_tags)
 
     modules = start_coverage!()
     setup_finished = now()
@@ -142,6 +148,24 @@ defmodule ExUnitTestValueCollect do
 
   defp configure_slow_tests(true), do: ExUnit.configure(include: [:slow])
   defp configure_slow_tests(false), do: ExUnit.configure(exclude: [:slow])
+
+  # Excluding is additive: ExUnit.configure/1 replaces the :exclude list, so the
+  # slow exclusion already set must be carried forward rather than overwritten.
+  defp configure_excluded_tags([]), do: :ok
+
+  defp configure_excluded_tags(tags) do
+    existing = ExUnit.configuration() |> Keyword.get(:exclude, [])
+    ExUnit.configure(exclude: Enum.uniq(existing ++ tags))
+  end
+
+  defp parse_tags(text) do
+    text
+    |> to_string()
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&String.to_atom/1)
+  end
 
   defp parse_max_files!(text) do
     case Integer.parse(text) do

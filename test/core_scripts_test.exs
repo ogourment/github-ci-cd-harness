@@ -75,6 +75,26 @@ defmodule CiCdHarness.CoreScriptsTest do
     assert "exunit_test_value_report.exs" in referenced
   end
 
+  # A tag the audit cannot run aborts the whole collection. Punnles' browser
+  # tests need a Playwright bridge the audit job does not start, which silently
+  # broke the full audit; excluding by tag is what keeps it auditing every other
+  # module instead of being shrunk to a handful.
+  test "the audit passes excluded tags through to the collector" do
+    audit = File.read!(Path.join(@core, "exunit_test_value_audit.sh"))
+    collect = File.read!(Path.join(@core, "exunit_test_value_collect.exs"))
+
+    assert audit =~ "EXUNIT_TEST_VALUE_AUDIT_EXCLUDE_TAGS"
+    assert audit =~ ~s("$exclude_tags")
+    assert collect =~ "exclude_tags_text"
+    assert collect =~ "configure_excluded_tags"
+  end
+
+  test "the collector still accepts the three-argument call it shipped with" do
+    collect = File.read!(Path.join(@core, "exunit_test_value_collect.exs"))
+
+    assert collect =~ ~r/def run\(\[output_dir, max_files_text, include_slow_text\]\)/
+  end
+
   defp siblings_referenced(script) do
     body = File.read!(Path.join(@core, script))
 

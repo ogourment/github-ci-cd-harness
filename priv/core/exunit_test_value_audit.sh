@@ -9,6 +9,10 @@ overlap_threshold="${EXUNIT_TEST_VALUE_AUDIT_OVERLAP_THRESHOLD:-0.95}"
 minimum_overlap_points="${EXUNIT_TEST_VALUE_AUDIT_MIN_OVERLAP_POINTS:-10}"
 max_modules="${EXUNIT_TEST_VALUE_AUDIT_MAX_MODULES:-0}"
 include_slow="${EXUNIT_TEST_VALUE_AUDIT_INCLUDE_SLOW:-false}"
+# Comma-separated ExUnit tags to exclude. A module the audit cannot run aborts
+# the whole collection, so a project whose suite needs an external service for
+# some tests names their tag here rather than shrinking the audit.
+exclude_tags="${EXUNIT_TEST_VALUE_AUDIT_EXCLUDE_TAGS:-}"
 mix_env="${EXUNIT_TEST_VALUE_AUDIT_MIX_ENV:-test}"
 
 case "$output_dir" in
@@ -54,12 +58,18 @@ if [[ "$include_slow" != "true" && "$include_slow" != "false" ]]; then
   exit 2
 fi
 
+if [[ -n "$exclude_tags" && ! "$exclude_tags" =~ ^[a-z_][a-z0-9_]*(,[a-z_][a-z0-9_]*)*$ ]]; then
+  echo "EXUNIT_TEST_VALUE_AUDIT_EXCLUDE_TAGS must be comma-separated tag names." >&2
+  exit 2
+fi
+
 batch_log="$resolved_output/logs/batch.log"
 
 if ! MIX_ENV="$mix_env" mix run "$script_dir/exunit_test_value_collect.exs" \
   "$resolved_output" \
   "$max_modules" \
-  "$include_slow" >"$batch_log" 2>&1; then
+  "$include_slow" \
+  "$exclude_tags" >"$batch_log" 2>&1; then
   echo "Batched ExUnit test-value collection failed." >&2
   tail -n 100 "$batch_log" >&2
   exit 1
