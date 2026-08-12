@@ -191,6 +191,20 @@
     - system_toolbox_dedicated_user_enabled
     - system_toolbox_identity_available
 
+- name: Remove deploy-user ACLs from privileged files
+  ansible.posix.acl:
+    path: "{{ system_toolbox_privileged_file }}"
+    entity: "{{ deploy_user }}"
+    etype: user
+    state: absent
+  loop:
+    - /usr/local/libexec/system-toolbox-maintenance
+    - /etc/system-toolbox/maintenance.json
+    - /etc/sudoers.d/system-toolbox-maintenance
+  loop_control:
+    loop_var: system_toolbox_privileged_file
+  when: system_toolbox_dedicated_user_enabled
+
 - name: Install dedicated system-toolbox service
   ansible.builtin.template:
     src: system-toolbox.service.j2

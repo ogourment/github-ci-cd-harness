@@ -23,11 +23,14 @@ defmodule CiCdHarness.SystemToolboxIdentityRoleTest do
     assert tasks =~ "shell: /usr/sbin/nologin"
     assert tasks =~ "dest: /usr/local/libexec/system-toolbox-maintenance"
     assert tasks =~ "path: /usr/local/libexec"
+    assert tasks =~ "Remove deploy-user ACLs from privileged files"
     assert tasks =~ "dest: /etc/sudoers.d/system-toolbox-maintenance"
     assert tasks =~ "validate: /usr/sbin/visudo -cf %s"
     refute tasks =~ ~r/NOPASSWD:.*(?:apt|systemctl|python|\/bin\/(?:ba)?sh)/
     assert unit =~ "User={{ system_toolbox_user }}"
     assert unit =~ "SYSTEM_TOOLBOX_HOST_USER={{ deploy_user }}"
+    assert unit =~ "SYSTEM_TOOLBOX_SERVICE_MANAGER=systemd"
+    assert unit =~ "SuccessExitStatus=143"
     assert unit =~ "StateDirectory=system-toolbox"
   end
 

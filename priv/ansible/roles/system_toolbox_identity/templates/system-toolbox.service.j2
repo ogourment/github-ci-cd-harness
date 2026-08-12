@@ -13,6 +13,7 @@ Environment=HOME={{ system_toolbox_home }}
 Environment=XDG_STATE_HOME={{ system_toolbox_home }}/.local/state
 Environment=OLIVIERG_HOST_INVENTORY={{ system_toolbox_home }}/.config/olivierg/host-inventory.json
 Environment=SYSTEM_TOOLBOX_HOST_USER={{ deploy_user }}
+Environment=SYSTEM_TOOLBOX_SERVICE_MANAGER=systemd
 Environment=SYSTEM_TOOLBOX_HOST={{ system_toolbox_host }}
 Environment=SYSTEM_TOOLBOX_PORT={{ system_toolbox_port }}
 {% if system_toolbox_source_url | length > 0 %}
@@ -21,6 +22,7 @@ Environment=SYSTEM_TOOLBOX_SOURCE_URL={{ system_toolbox_source_url }}
 ExecStart={{ system_toolbox_uv_path }} run system-toolbox serve --host {{ system_toolbox_host }} --port {{ system_toolbox_port }}
 Restart=on-failure
 RestartSec=5
+SuccessExitStatus=143
 
 [Install]
 WantedBy=multi-user.target
