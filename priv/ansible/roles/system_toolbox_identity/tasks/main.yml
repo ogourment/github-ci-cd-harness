@@ -37,6 +37,7 @@
     src: "{{ system_toolbox_local_source }}/"
     dest: "{{ system_toolbox_dir }}/"
     delete: true
+    rsync_path: "sudo -n rsync"
     rsync_opts:
       - "--exclude=.git/"
       - "--exclude=.venv/"
@@ -44,6 +45,7 @@
       - "--exclude=.pytest_cache/"
       - "--exclude=.ruff_cache/"
       - "--exclude=__pycache__/"
+      - "--exclude=tmp/"
   delegate_to: localhost
   become: false
   when:
