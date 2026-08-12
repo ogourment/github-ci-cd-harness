@@ -148,6 +148,15 @@
     mode: "0755"
   when: system_toolbox_dedicated_user_enabled
 
+- name: Ensure local privileged helper directory exists
+  ansible.builtin.file:
+    path: /usr/local/libexec
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: system_toolbox_dedicated_user_enabled
+
 - name: Install root-owned system-toolbox maintenance helper
   ansible.builtin.copy:
     src: "{{ system_toolbox_dir }}/packaging/system-toolbox-maintenance"

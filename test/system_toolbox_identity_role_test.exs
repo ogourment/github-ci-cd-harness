@@ -22,6 +22,7 @@ defmodule CiCdHarness.SystemToolboxIdentityRoleTest do
     assert tasks =~ "not ansible_check_mode"
     assert tasks =~ "shell: /usr/sbin/nologin"
     assert tasks =~ "dest: /usr/local/libexec/system-toolbox-maintenance"
+    assert tasks =~ "path: /usr/local/libexec"
     assert tasks =~ "dest: /etc/sudoers.d/system-toolbox-maintenance"
     assert tasks =~ "validate: /usr/sbin/visudo -cf %s"
     refute tasks =~ ~r/NOPASSWD:.*(?:apt|systemctl|python|\/bin\/(?:ba)?sh)/
