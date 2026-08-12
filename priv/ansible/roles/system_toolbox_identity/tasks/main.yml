@@ -18,6 +18,20 @@
     create_home: true
   when: system_toolbox_dedicated_user_enabled
 
+- name: Inspect system-toolbox identity after account declaration
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ system_toolbox_user }}"
+    fail_key: false
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Record whether identity-dependent checks can run
+  ansible.builtin.set_fact:
+    system_toolbox_identity_available: >-
+      {{ not ansible_check_mode or
+         (ansible_facts.getent_passwd[system_toolbox_user] | default(none)) is not none }}
+  when: system_toolbox_dedicated_user_enabled
+
 - name: Synchronize system-toolbox source from controller
   ansible.posix.synchronize:
     src: "{{ system_toolbox_local_source }}/"
@@ -32,7 +46,9 @@
       - "--exclude=__pycache__/"
   delegate_to: localhost
   become: false
-  when: system_toolbox_dedicated_user_enabled
+  when:
+    - system_toolbox_dedicated_user_enabled
+    - system_toolbox_identity_available
 
 - name: Give the dedicated identity ownership of the deployed toolbox
   ansible.builtin.file:
@@ -41,7 +57,9 @@
     owner: "{{ system_toolbox_user }}"
     group: "{{ system_toolbox_user }}"
     recurse: true
-  when: system_toolbox_dedicated_user_enabled
+  when:
+    - system_toolbox_dedicated_user_enabled
+    - system_toolbox_identity_available
 
 - name: Preserve deploy-user source synchronization access
   ansible.posix.acl:
@@ -51,7 +69,9 @@
     permissions: rwX
     state: present
     recursive: true
-  when: system_toolbox_dedicated_user_enabled
+  when:
+    - system_toolbox_dedicated_user_enabled
+    - system_toolbox_identity_available
 
 - name: Preserve deploy-user access on future source entries
   ansible.posix.acl:
@@ -61,7 +81,9 @@
     permissions: rwX
     default: true
     state: present
-  when: system_toolbox_dedicated_user_enabled
+  when:
+    - system_toolbox_dedicated_user_enabled
+    - system_toolbox_identity_available
 
 - name: Synchronize dedicated system-toolbox dependencies
   ansible.builtin.command:
@@ -74,7 +96,9 @@
   environment:
     HOME: "{{ system_toolbox_home }}"
   changed_when: false
-  when: system_toolbox_dedicated_user_enabled
+  when:
+    - system_toolbox_dedicated_user_enabled
+    - system_toolbox_identity_available
 
 - name: Ensure dedicated system-toolbox inventory directory exists
   ansible.builtin.file:
@@ -83,7 +107,9 @@
     owner: "{{ system_toolbox_user }}"
     group: "{{ system_toolbox_user }}"
     mode: "0700"
-  when: system_toolbox_dedicated_user_enabled
+  when:
+    - system_toolbox_dedicated_user_enabled
+    - system_toolbox_identity_available
 
 - name: Copy host inventory for dedicated system-toolbox identity
   ansible.builtin.copy:
@@ -93,7 +119,9 @@
     owner: "{{ system_toolbox_user }}"
     group: "{{ system_toolbox_user }}"
     mode: "0600"
-  when: system_toolbox_dedicated_user_enabled
+  when:
+    - system_toolbox_dedicated_user_enabled
+    - system_toolbox_identity_available
 
 - name: Ensure privileged helper configuration directory exists
   ansible.builtin.file:
@@ -112,7 +140,9 @@
     owner: root
     group: root
     mode: "0755"
-  when: system_toolbox_dedicated_user_enabled
+  when:
+    - system_toolbox_dedicated_user_enabled
+    - system_toolbox_identity_available
 
 - name: Install system-toolbox maintenance allowlists
   ansible.builtin.template:
@@ -132,7 +162,9 @@
     group: root
     mode: "0440"
     validate: /usr/sbin/visudo -cf %s
-  when: system_toolbox_dedicated_user_enabled
+  when:
+    - system_toolbox_dedicated_user_enabled
+    - system_toolbox_identity_available
 
 - name: Install dedicated system-toolbox service
   ansible.builtin.template:
@@ -144,7 +176,9 @@
   when: system_toolbox_dedicated_user_enabled
 
 - name: Migrate system-toolbox to its dedicated identity
-  when: system_toolbox_dedicated_user_enabled
+  when:
+    - system_toolbox_dedicated_user_enabled
+    - system_toolbox_identity_available
   block:
     - name: Stop legacy deploy-user system-toolbox service
       ansible.builtin.systemd:

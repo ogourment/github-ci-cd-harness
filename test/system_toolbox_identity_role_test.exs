@@ -14,6 +14,8 @@ defmodule CiCdHarness.SystemToolboxIdentityRoleTest do
     assert defaults =~ ~s(system_toolbox_local_source: "")
     assert tasks =~ "Synchronize system-toolbox source from controller"
     assert tasks =~ "Synchronize dedicated system-toolbox dependencies"
+    assert tasks =~ "system_toolbox_identity_available"
+    assert tasks =~ "not ansible_check_mode"
     assert tasks =~ "shell: /usr/sbin/nologin"
     assert tasks =~ "dest: /usr/local/libexec/system-toolbox-maintenance"
     assert tasks =~ "dest: /etc/sudoers.d/system-toolbox-maintenance"
