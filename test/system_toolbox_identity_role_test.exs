@@ -38,6 +38,8 @@ defmodule CiCdHarness.SystemToolboxIdentityRoleTest do
     tasks = read("tasks/main.yml")
 
     assert tasks =~ "service_manager | default('') == 'systemd'"
+    assert tasks =~ "Enable and restart dedicated system-toolbox service"
+    assert tasks =~ "state: restarted"
     assert tasks =~ "Restore legacy deploy-user system-toolbox service"
     assert tasks =~ "the legacy\n          deploy-user service was restored"
   end

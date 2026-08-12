@@ -229,13 +229,13 @@
       environment:
         XDG_RUNTIME_DIR: "/run/user/{{ deploy_user_uid }}"
 
-    - name: Enable dedicated system-toolbox service
+    - name: Enable and restart dedicated system-toolbox service
       ansible.builtin.systemd:
         name: system-toolbox
         scope: system
         daemon_reload: true
         enabled: true
-        state: started
+        state: restarted
 
     - name: Verify dedicated system-toolbox health
       ansible.builtin.uri:
