@@ -13,6 +13,7 @@ defmodule CiCdHarness.SystemToolboxIdentityRoleTest do
     assert defaults =~ "system_toolbox_privileged_user_units: {}"
     assert defaults =~ ~s(system_toolbox_local_source: "")
     assert tasks =~ "Synchronize system-toolbox source from controller"
+    assert tasks =~ "Ensure dedicated system-toolbox source directory exists"
     assert tasks =~ ~s(rsync_path: "sudo -n rsync")
     assert tasks =~ ~s("--exclude=tmp/")
     assert tasks =~ "Synchronize dedicated system-toolbox dependencies"

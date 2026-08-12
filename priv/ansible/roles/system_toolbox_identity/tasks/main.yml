@@ -32,6 +32,17 @@
          (ansible_facts.getent_passwd[system_toolbox_user] | default(none)) is not none }}
   when: system_toolbox_dedicated_user_enabled
 
+- name: Ensure dedicated system-toolbox source directory exists
+  ansible.builtin.file:
+    path: "{{ system_toolbox_dir }}"
+    state: directory
+    owner: "{{ system_toolbox_user }}"
+    group: "{{ system_toolbox_user }}"
+    mode: "0755"
+  when:
+    - system_toolbox_dedicated_user_enabled
+    - system_toolbox_identity_available
+
 - name: Synchronize system-toolbox source from controller
   ansible.posix.synchronize:
     src: "{{ system_toolbox_local_source }}/"
