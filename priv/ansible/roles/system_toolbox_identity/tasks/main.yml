@@ -61,6 +61,20 @@
     - system_toolbox_dedicated_user_enabled
     - system_toolbox_identity_available
 
+- name: Give the dedicated identity execute-only access to source parents
+  ansible.posix.acl:
+    path: "{{ system_toolbox_parent_path }}"
+    entity: "{{ system_toolbox_user }}"
+    etype: user
+    permissions: x
+    state: present
+  loop: "{{ system_toolbox_traverse_paths }}"
+  loop_control:
+    loop_var: system_toolbox_parent_path
+  when:
+    - system_toolbox_dedicated_user_enabled
+    - system_toolbox_identity_available
+
 - name: Preserve deploy-user source synchronization access
   ansible.posix.acl:
     path: "{{ system_toolbox_dir }}"

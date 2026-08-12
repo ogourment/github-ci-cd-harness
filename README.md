@@ -99,7 +99,8 @@ The role migrates an already deployed system-toolbox checkout from the deploy
 user's service to a locked `system-toolbox` system identity. It synchronizes
 the controller's selected source and dependencies under that identity, installs only
 the toolbox's root-owned maintenance helper and sudoers policy, preserves
-deploy-user source synchronization through ACLs, verifies the new `/health`
+deploy-user source synchronization through ACLs, grants the identity only
+execute traversal on otherwise-private source parents, verifies the new `/health`
 service-manager identity, and restores the legacy service automatically when
 that verification fails. Exact privileged system units and deploy-user units
 remain consumer-owned allowlists.
