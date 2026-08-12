@@ -95,7 +95,8 @@ their host inventory and rollout decisions, add this directory to
 `system_toolbox_dedicated_user_enabled: true`.
 
 The role migrates an already deployed system-toolbox checkout from the deploy
-user's service to a locked `system-toolbox` system identity. It installs only
+user's service to a locked `system-toolbox` system identity. It synchronizes
+the controller's selected source and dependencies under that identity, installs only
 the toolbox's root-owned maintenance helper and sudoers policy, preserves
 deploy-user source synchronization through ACLs, verifies the new `/health`
 service-manager identity, and restores the legacy service automatically when

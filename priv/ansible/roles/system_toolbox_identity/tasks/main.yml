@@ -6,6 +6,7 @@
       - deploy_user | length > 0
       - system_toolbox_dir | length > 0
       - system_toolbox_uv_path | length > 0
+      - not system_toolbox_dedicated_user_enabled or system_toolbox_local_source | length > 0
     quiet: true
 
 - name: Ensure locked system-toolbox identity exists
@@ -15,6 +16,22 @@
     shell: /usr/sbin/nologin
     system: true
     create_home: true
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Synchronize system-toolbox source from controller
+  ansible.posix.synchronize:
+    src: "{{ system_toolbox_local_source }}/"
+    dest: "{{ system_toolbox_dir }}/"
+    delete: true
+    rsync_opts:
+      - "--exclude=.git/"
+      - "--exclude=.venv/"
+      - "--exclude=.coverage"
+      - "--exclude=.pytest_cache/"
+      - "--exclude=.ruff_cache/"
+      - "--exclude=__pycache__/"
+  delegate_to: localhost
+  become: false
   when: system_toolbox_dedicated_user_enabled
 
 - name: Give the dedicated identity ownership of the deployed toolbox
@@ -44,6 +61,19 @@
     permissions: rwX
     default: true
     state: present
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Synchronize dedicated system-toolbox dependencies
+  ansible.builtin.command:
+    argv:
+      - "{{ system_toolbox_uv_path }}"
+      - sync
+  args:
+    chdir: "{{ system_toolbox_dir }}"
+  become_user: "{{ system_toolbox_user }}"
+  environment:
+    HOME: "{{ system_toolbox_home }}"
+  changed_when: false
   when: system_toolbox_dedicated_user_enabled
 
 - name: Ensure dedicated system-toolbox inventory directory exists

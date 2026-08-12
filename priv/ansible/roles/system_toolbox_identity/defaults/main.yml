@@ -2,6 +2,7 @@
 system_toolbox_dedicated_user_enabled: false
 system_toolbox_user: system-toolbox
 system_toolbox_home: "/var/lib/{{ system_toolbox_user }}"
+system_toolbox_local_source: ""
 system_toolbox_dir: "/home/{{ deploy_user }}/work/python/system-toolbox"
 system_toolbox_host: "0.0.0.0"
 system_toolbox_port: 8789

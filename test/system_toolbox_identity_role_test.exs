@@ -11,6 +11,9 @@ defmodule CiCdHarness.SystemToolboxIdentityRoleTest do
     assert defaults =~ "system_toolbox_dedicated_user_enabled: false"
     assert defaults =~ "system_toolbox_privileged_units: []"
     assert defaults =~ "system_toolbox_privileged_user_units: {}"
+    assert defaults =~ ~s(system_toolbox_local_source: "")
+    assert tasks =~ "Synchronize system-toolbox source from controller"
+    assert tasks =~ "Synchronize dedicated system-toolbox dependencies"
     assert tasks =~ "shell: /usr/sbin/nologin"
     assert tasks =~ "dest: /usr/local/libexec/system-toolbox-maintenance"
     assert tasks =~ "dest: /etc/sudoers.d/system-toolbox-maintenance"
