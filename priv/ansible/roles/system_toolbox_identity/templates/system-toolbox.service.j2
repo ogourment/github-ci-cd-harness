@@ -1,0 +1,26 @@
+[Unit]
+Description=system-toolbox host tool server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ system_toolbox_user }}
+Group={{ system_toolbox_user }}
+WorkingDirectory={{ system_toolbox_dir }}
+StateDirectory=system-toolbox
+Environment=HOME={{ system_toolbox_home }}
+Environment=XDG_STATE_HOME={{ system_toolbox_home }}/.local/state
+Environment=OLIVIERG_HOST_INVENTORY={{ system_toolbox_home }}/.config/olivierg/host-inventory.json
+Environment=SYSTEM_TOOLBOX_HOST_USER={{ deploy_user }}
+Environment=SYSTEM_TOOLBOX_HOST={{ system_toolbox_host }}
+Environment=SYSTEM_TOOLBOX_PORT={{ system_toolbox_port }}
+{% if system_toolbox_source_url | length > 0 %}
+Environment=SYSTEM_TOOLBOX_SOURCE_URL={{ system_toolbox_source_url }}
+{% endif %}
+ExecStart={{ system_toolbox_uv_path }} run system-toolbox serve --host {{ system_toolbox_host }} --port {{ system_toolbox_port }}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

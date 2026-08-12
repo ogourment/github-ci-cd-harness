@@ -1,0 +1,208 @@
+---
+- name: Validate system-toolbox identity configuration
+  ansible.builtin.assert:
+    that:
+      - deploy_user is defined
+      - deploy_user | length > 0
+      - system_toolbox_dir | length > 0
+      - system_toolbox_uv_path | length > 0
+    quiet: true
+
+- name: Ensure locked system-toolbox identity exists
+  ansible.builtin.user:
+    name: "{{ system_toolbox_user }}"
+    home: "{{ system_toolbox_home }}"
+    shell: /usr/sbin/nologin
+    system: true
+    create_home: true
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Give the dedicated identity ownership of the deployed toolbox
+  ansible.builtin.file:
+    path: "{{ system_toolbox_dir }}"
+    state: directory
+    owner: "{{ system_toolbox_user }}"
+    group: "{{ system_toolbox_user }}"
+    recurse: true
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Preserve deploy-user source synchronization access
+  ansible.posix.acl:
+    path: "{{ system_toolbox_dir }}"
+    entity: "{{ deploy_user }}"
+    etype: user
+    permissions: rwX
+    state: present
+    recursive: true
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Preserve deploy-user access on future source entries
+  ansible.posix.acl:
+    path: "{{ system_toolbox_dir }}"
+    entity: "{{ deploy_user }}"
+    etype: user
+    permissions: rwX
+    default: true
+    state: present
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Ensure dedicated system-toolbox inventory directory exists
+  ansible.builtin.file:
+    path: "{{ system_toolbox_home }}/.config/olivierg"
+    state: directory
+    owner: "{{ system_toolbox_user }}"
+    group: "{{ system_toolbox_user }}"
+    mode: "0700"
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Copy host inventory for dedicated system-toolbox identity
+  ansible.builtin.copy:
+    src: "/home/{{ deploy_user }}/.config/olivierg/host-inventory.json"
+    dest: "{{ system_toolbox_home }}/.config/olivierg/host-inventory.json"
+    remote_src: true
+    owner: "{{ system_toolbox_user }}"
+    group: "{{ system_toolbox_user }}"
+    mode: "0600"
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Ensure privileged helper configuration directory exists
+  ansible.builtin.file:
+    path: /etc/system-toolbox
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Install root-owned system-toolbox maintenance helper
+  ansible.builtin.copy:
+    src: "{{ system_toolbox_dir }}/packaging/system-toolbox-maintenance"
+    dest: /usr/local/libexec/system-toolbox-maintenance
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Install system-toolbox maintenance allowlists
+  ansible.builtin.template:
+    src: maintenance.json.j2
+    dest: /etc/system-toolbox/maintenance.json
+    owner: root
+    group: root
+    mode: "0644"
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Install narrow system-toolbox sudoers policy
+  ansible.builtin.copy:
+    src: "{{ system_toolbox_dir }}/packaging/system-toolbox-maintenance.sudoers"
+    dest: /etc/sudoers.d/system-toolbox-maintenance
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Install dedicated system-toolbox service
+  ansible.builtin.template:
+    src: system-toolbox.service.j2
+    dest: /etc/systemd/system/system-toolbox.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: system_toolbox_dedicated_user_enabled
+
+- name: Migrate system-toolbox to its dedicated identity
+  when: system_toolbox_dedicated_user_enabled
+  block:
+    - name: Stop legacy deploy-user system-toolbox service
+      ansible.builtin.systemd:
+        name: system-toolbox
+        scope: user
+        enabled: false
+        state: stopped
+      become_user: "{{ deploy_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ deploy_user_uid }}"
+
+    - name: Enable dedicated system-toolbox service
+      ansible.builtin.systemd:
+        name: system-toolbox
+        scope: system
+        daemon_reload: true
+        enabled: true
+        state: started
+
+    - name: Verify dedicated system-toolbox health
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ system_toolbox_port }}/health"
+        return_content: true
+        status_code: 200
+      register: system_toolbox_dedicated_health
+      retries: 10
+      delay: 2
+      until:
+        - system_toolbox_dedicated_health.json.ok | default(false)
+        - system_toolbox_dedicated_health.json.runtime.service_manager | default('') == 'systemd'
+  rescue:
+    - name: Stop failed dedicated system-toolbox service
+      ansible.builtin.systemd:
+        name: system-toolbox
+        scope: system
+        enabled: false
+        state: stopped
+      failed_when: false
+
+    - name: Restore legacy deploy-user system-toolbox service
+      ansible.builtin.systemd:
+        name: system-toolbox
+        scope: user
+        enabled: true
+        state: started
+      become_user: "{{ deploy_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ deploy_user_uid }}"
+
+    - name: Report dedicated identity migration failure
+      ansible.builtin.fail:
+        msg: >-
+          Dedicated system-toolbox health verification failed; the legacy
+          deploy-user service was restored.
+
+- name: Inspect dedicated system-toolbox unit for rollback
+  ansible.builtin.stat:
+    path: /etc/systemd/system/system-toolbox.service
+  register: system_toolbox_dedicated_unit
+  when: not system_toolbox_dedicated_user_enabled
+
+- name: Roll back to the deploy-user service
+  when:
+    - not system_toolbox_dedicated_user_enabled
+    - system_toolbox_dedicated_unit.stat.exists | default(false)
+  block:
+    - name: Stop dedicated system-toolbox service
+      ansible.builtin.systemd:
+        name: system-toolbox
+        scope: system
+        enabled: false
+        state: stopped
+
+    - name: Remove dedicated system-toolbox unit
+      ansible.builtin.file:
+        path: /etc/systemd/system/system-toolbox.service
+        state: absent
+
+    - name: Reload systemd after dedicated service removal
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restore deploy-user system-toolbox service
+      ansible.builtin.systemd:
+        name: system-toolbox
+        scope: user
+        enabled: true
+        state: started
+      become_user: "{{ deploy_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ deploy_user_uid }}"

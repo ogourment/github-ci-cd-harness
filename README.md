@@ -85,3 +85,19 @@ failed builds intermittently.
 Extracted from Agile-U's Forgejo delivery scripts, which remain in that
 repository until it migrates onto this package. Until then the logic exists in
 two places; close that before a third consumer appears.
+
+## System-toolbox infrastructure role
+
+The package also ships the provider-neutral Ansible role at
+`priv/ansible/roles/system_toolbox_identity`. Infrastructure repositories keep
+their host inventory and rollout decisions, add this directory to
+`roles_path`, and opt in one host with
+`system_toolbox_dedicated_user_enabled: true`.
+
+The role migrates an already deployed system-toolbox checkout from the deploy
+user's service to a locked `system-toolbox` system identity. It installs only
+the toolbox's root-owned maintenance helper and sudoers policy, preserves
+deploy-user source synchronization through ACLs, verifies the new `/health`
+service-manager identity, and restores the legacy service automatically when
+that verification fails. Exact privileged system units and deploy-user units
+remain consumer-owned allowlists.
