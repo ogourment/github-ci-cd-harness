@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 # Bootstrap for private dependency access.
 #
-# This is the one piece that cannot live in the harness package: it installs the
-# SSH keys that let `mix deps.get` reach private dependencies, and so must run
-# before the package itself can be fetched. Applications keep a copy and invoke
-# it as their first CI step.
+# Consumers with private dependencies keep a copy of this bootstrap and invoke
+# it before `mix deps.get`. The harness itself is publicly readable over HTTPS.
 set -euo pipefail
 
 install -d -m 0700 "${HOME}/.ssh"
 
-# Framagit hosts acceptance_harness; git.agile-u.com hosts ci_cd_harness.
+# Install only credentials required by a consumer's remaining private Git deps.
 if [[ -n "${FRAMAGIT_DEPLOY_KEY:-}" ]]; then
   printf '%s\n' "${FRAMAGIT_DEPLOY_KEY}" >"${HOME}/.ssh/framagit-ci"
   chmod 0600 "${HOME}/.ssh/framagit-ci"

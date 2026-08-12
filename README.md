@@ -43,7 +43,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "git@git.agile-u.com:olivierg/ci-cd-harness.git", tag: "v0.3.0", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.6", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -59,10 +59,11 @@ and verify so an artifact traces back to the run and commit that produced it.
 ## The bootstrap exception
 
 `priv/forges/forgejo/setup_private_deps.sh` installs the SSH keys that let
-`mix deps.get` reach private dependencies — including this package. It therefore
-cannot arrive *as* this package. Applications keep a copy in their own
-repository and run it as their first CI step; everything after `deps.get` comes
-from here.
+`mix deps.get` reach any remaining private dependencies. This package itself is
+publicly readable over HTTPS, so consumers do not need a Forgejo credential to
+fetch it. Applications that still have private dependencies keep a copy of the
+bootstrap script in their own repository and run it before `deps.get`;
+everything after dependency resolution comes from this package.
 
 ## Delivery scripts
 
