@@ -1,0 +1,80 @@
+.ci_cd_mix_cache:
+  variables:
+    MIX_HOME: "$CI_PROJECT_DIR/.mix"
+    HEX_HOME: "$CI_PROJECT_DIR/.hex"
+  cache:
+    - key:
+        prefix: "mix-deps-${CI_CD_MIX_CACHE_IMAGE_KEY}-${MIX_ENV}"
+        files:
+          - mix.lock
+      paths:
+        - deps/
+        - .mix/
+        - .hex/
+      policy: pull-push
+    - key:
+        prefix: "mix-build-${CI_CD_MIX_CACHE_IMAGE_KEY}-${MIX_ENV}-${CI_JOB_NAME}"
+        files:
+          - mix.lock
+      paths:
+        - _build/dev/
+        - _build/test/
+        - _build/prod/
+        - priv/plts/
+      policy: pull-push
+
+.ci_cd_exunit_test_budget:
+  stage: test
+  variables:
+    CI_CD_HARNESS_URL: "https://git.agile-u.com/olivierg/ci-cd-harness.git"
+    CI_CD_HARNESS_REF: "v0.4.15"
+    EXUNIT_TEST_BUDGET_FILE: "config/test_budget.tsv"
+    EXUNIT_TEST_BUDGET_LOGS: "test.log"
+    EXUNIT_TEST_BUDGET_THRESHOLD_PERCENT: "10"
+    EXUNIT_TEST_BUDGET_MEASURED_FILE: "tmp/ci/exunit_test_budget_measured.tsv"
+  before_script:
+    - rm -rf .ci-cd-harness
+    - >-
+      git clone --quiet --depth 1 --branch "$CI_CD_HARNESS_REF"
+      "${CI_CD_HARNESS_URL}"
+      .ci-cd-harness
+  script:
+    - >-
+      .ci-cd-harness/priv/core/exunit_test_budget.sh
+      "$EXUNIT_TEST_BUDGET_FILE"
+      $EXUNIT_TEST_BUDGET_LOGS
+  artifacts:
+    when: always
+    paths:
+      - tmp/ci/exunit_test_budget_measured.tsv
+    expire_in: 1 week
+
+.ci_cd_exunit_test_value_audit:
+  extends: .ci_cd_mix_cache
+  stage: test
+  variables:
+    CI_CD_HARNESS_URL: "https://git.agile-u.com/olivierg/ci-cd-harness.git"
+    CI_CD_HARNESS_REF: "v0.4.15"
+    EXUNIT_TEST_VALUE_AUDIT_OUTPUT_DIR: "tmp/ci/exunit_test_value_audit"
+    EXUNIT_TEST_VALUE_AUDIT_OVERLAP_THRESHOLD: "0.95"
+    EXUNIT_TEST_VALUE_AUDIT_MIN_OVERLAP_POINTS: "10"
+    EXUNIT_TEST_VALUE_AUDIT_MAX_MODULES: "0"
+    EXUNIT_TEST_VALUE_AUDIT_INCLUDE_SLOW: "false"
+    EXUNIT_TEST_VALUE_AUDIT_MIX_ENV: "test"
+  script:
+    - rm -rf .ci-cd-harness
+    - >-
+      git clone --quiet --depth 1 --branch "$CI_CD_HARNESS_REF"
+      "${CI_CD_HARNESS_URL}"
+      .ci-cd-harness
+    - .ci-cd-harness/priv/core/exunit_test_value_audit.sh
+  artifacts:
+    when: always
+    paths:
+      - $EXUNIT_TEST_VALUE_AUDIT_OUTPUT_DIR/
+    expire_in: 2 weeks
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: on_success
+    - when: manual
