@@ -53,7 +53,9 @@ defmodule CiCdHarness.CoreScriptsTest do
 
   test "every shell script parses" do
     for script <- @shell_scripts do
-      {output, status} = System.cmd("bash", ["-n", Path.join(@core, script)], stderr_to_stdout: true)
+      {output, status} =
+        System.cmd("bash", ["-n", Path.join(@core, script)], stderr_to_stdout: true)
+
       assert status == 0, "#{script} does not parse: #{output}"
     end
   end

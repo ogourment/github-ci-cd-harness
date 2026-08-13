@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# Best-effort Telegram notifier for {{ app_name }} deploys.
+# Managed by Ansible at {{ telegram_notify_script }} — do not edit by hand.
+#
+# Usage:  {{ telegram_notify_script }} "<html message>"
+#         {{ telegram_notify_script }} --verify
+# Env:    TELEGRAM_SILENT=true|false  (disable_notification)
+#
+# Reads TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID from the active color's env file
+# (they are set there when configured). Silent no-op if unset.
+#
+set -euo pipefail
+
+ACTION="${1:-}"
+[[ -n "${ACTION}" ]] || exit 2
+
+CURRENT_COLOR="$(cat {{ app_current_color_file }} 2>/dev/null || echo blue)"
+SLOT_ENV_FILE_TEMPLATE="{{ app_slot_env_file_template }}"
+ENV_FILE="${SLOT_ENV_FILE_TEMPLATE/\%s/${CURRENT_COLOR}}"
+[[ -f "{{ app_env_file }}" ]] && { set -a; . "{{ app_env_file }}"; set +a; }
+[[ -f "${ENV_FILE}" ]] && { set -a; . "${ENV_FILE}"; set +a; }
+
+: "${TELEGRAM_BOT_TOKEN:=}"
+: "${TELEGRAM_CHAT_ID:=}"
+if [[ -z "${TELEGRAM_BOT_TOKEN}" || -z "${TELEGRAM_CHAT_ID}" ]]; then
+  echo "Telegram delivery unavailable: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is unset" >&2
+  exit 3
+fi
+
+telegram_request() {
+  local method="$1"
+  shift
+  local response_file http_status description
+
+  response_file="$(mktemp)"
+  http_status="$(
+    curl --silent --show-error \
+      --connect-timeout 5 \
+      --max-time 10 \
+      --output "${response_file}" \
+      --write-out '%{http_code}' \
+      "$@" \
+      "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}"
+  )" || {
+    rm -f "${response_file}"
+    echo "Telegram ${method} transport failed" >&2
+    return 1
+  }
+
+  if [[ "${http_status}" != 2* ]] || ! jq -e '.ok == true' "${response_file}" >/dev/null 2>&1; then
+    description="$(jq -r '.description // "unknown Telegram API error"' "${response_file}" 2>/dev/null || echo "invalid Telegram response")"
+    rm -f "${response_file}"
+    printf 'Telegram %s failed: HTTP %s: %s\n' "${method}" "${http_status}" "${description}" >&2
+    return 1
+  fi
+
+  TELEGRAM_RESPONSE_FILE="${response_file}"
+}
+
+if [[ "${ACTION}" == "--verify" ]]; then
+  telegram_request getMe
+  rm -f "${TELEGRAM_RESPONSE_FILE}"
+  telegram_request getChat --get --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}"
+  rm -f "${TELEGRAM_RESPONSE_FILE}"
+  echo "Telegram bot and chat access verified."
+  exit 0
+fi
+
+MESSAGE="${ACTION}"
+
+case "${TELEGRAM_SILENT:-true}" in
+  0|false|FALSE|no|NO) SILENT=false ;;
+  *) SILENT=true ;;
+esac
+
+telegram_request sendMessage \
+  --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+  --data-urlencode "text=${MESSAGE}" \
+  --data-urlencode "parse_mode=HTML" \
+  --data-urlencode "disable_notification=${SILENT}" \
+  --data-urlencode 'link_preview_options={"is_disabled":true}'
+
+message_id="$(jq -r '.result.message_id // "unknown"' "${TELEGRAM_RESPONSE_FILE}")"
+rm -f "${TELEGRAM_RESPONSE_FILE}"
+printf 'Telegram message delivered: message_id=%s silent=%s\n' "${message_id}" "${SILENT}"

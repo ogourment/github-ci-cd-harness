@@ -43,7 +43,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.6", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.13", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -80,6 +80,14 @@ relative to themselves, and a test enforces that.
 Consuming them through this package also removes a network fetch from every
 job. Cloning them per job made CI depend on a forge that rate-limits SSH, which
 failed builds intermittently.
+
+## Ansible roles
+
+Reusable infrastructure roles live under `priv/ansible/roles` so both Mix
+dependency consumers and repositories that pin this project as a submodule use
+the same provider-neutral implementation. The package includes `common`,
+`phoenix_postgres`, `phoenix_blue_green`, `web`, `phoenix_backup`, and
+`system_toolbox_identity`.
 
 ## Status
 

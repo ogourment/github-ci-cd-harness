@@ -1,0 +1,118 @@
+---
+- name: Validate web role configuration
+  ansible.builtin.assert:
+    that:
+      - app_name is defined and app_name | length > 0
+      - server_name is defined and server_name | length > 0
+      - certbot_email is defined and certbot_email | length > 0
+      - nginx_upstream_name is defined and nginx_upstream_name | length > 0
+    quiet: true
+
+- name: Validate optional nginx uploads configuration
+  ansible.builtin.assert:
+    that:
+      - (nginx_uploads_dir | length > 0) == (nginx_uploads_url_prefix | length > 0)
+      - nginx_uploads_url_prefix | length == 0 or nginx_uploads_url_prefix is match('^/[^/].*[^/]$|^/[^/]$')
+    quiet: true
+
+- name: Install nginx and Certbot
+  ansible.builtin.apt:
+    pkg: "{{ web_packages }}"
+    state: present
+
+- name: Ensure nginx is enabled and running
+  ansible.builtin.service:
+    name: nginx
+    enabled: true
+    state: started
+
+- name: Remove legacy nginx site links
+  ansible.builtin.file:
+    path: "/etc/nginx/sites-enabled/{{ item }}"
+    state: absent
+  loop: "{{ nginx_legacy_site_names }}"
+  notify: Reload nginx
+
+- name: Remove legacy nginx site definitions
+  ansible.builtin.file:
+    path: "/etc/nginx/sites-available/{{ item }}"
+    state: absent
+  loop: "{{ nginx_legacy_site_names }}"
+  notify: Reload nginx
+
+- name: Remove legacy nginx upstream includes
+  ansible.builtin.file:
+    path: "/etc/nginx/conf.d/{{ item }}"
+    state: absent
+  loop: "{{ nginx_legacy_upstream_includes }}"
+  notify: Reload nginx
+
+- name: Check whether the TLS certificate exists
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ server_name }}/fullchain.pem"
+  register: ssl_cert
+
+- name: Create nginx configuration matching current TLS state
+  ansible.builtin.template:
+    src: app.nginx.j2
+    dest: "/etc/nginx/sites-available/{{ nginx_site_name }}"
+    mode: "0644"
+  vars:
+    ssl_enabled: "{{ ssl_cert.stat.exists }}"
+  notify: Reload nginx
+
+- name: Enable nginx site
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ nginx_site_name }}"
+    dest: "/etc/nginx/sites-enabled/{{ nginx_site_name }}"
+    state: link
+  notify: Reload nginx
+
+- name: Remove default nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload nginx
+
+- name: Reload nginx before Certbot
+  ansible.builtin.meta: flush_handlers
+
+- name: Obtain initial TLS certificate
+  ansible.builtin.command: >-
+    certbot certonly --nginx
+    -d {{ server_name }}
+    {% for alias in server_aliases %}-d {{ alias }} {% endfor %}
+    --non-interactive --agree-tos -m {{ certbot_email }}
+  when: not ssl_cert.stat.exists
+
+- name: Read subject alternative names on existing certificate
+  ansible.builtin.shell: |
+    set -o pipefail
+    openssl x509 -in /etc/letsencrypt/live/{{ server_name }}/fullchain.pem -noout -ext subjectAltName \
+      | tr ',' '\n' | grep -oE 'DNS:[^ ,]+' | sed 's/DNS://' | sort -u
+  args:
+    executable: /bin/bash
+  register: cert_sans
+  changed_when: false
+  check_mode: false
+  when: ssl_cert.stat.exists
+
+- name: Expand TLS certificate to required hostnames
+  ansible.builtin.command: >-
+    certbot certonly --nginx --expand --cert-name {{ server_name }}
+    -d {{ server_name }}
+    {% for alias in server_aliases %}-d {{ alias }} {% endfor %}
+    --non-interactive --agree-tos -m {{ certbot_email }}
+  when:
+    - ssl_cert.stat.exists
+    - (([server_name] + server_aliases) | difference(cert_sans.stdout_lines)) | length > 0
+
+- name: Create TLS nginx configuration after initial certificate issuance
+  ansible.builtin.template:
+    src: app.nginx.j2
+    dest: "/etc/nginx/sites-available/{{ nginx_site_name }}"
+    mode: "0644"
+  vars:
+    ssl_enabled: true
+  when: not ssl_cert.stat.exists
+  notify: Reload nginx

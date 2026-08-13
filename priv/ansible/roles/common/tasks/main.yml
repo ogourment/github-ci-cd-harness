@@ -1,0 +1,349 @@
+---
+- name: Validate base host configuration
+  ansible.builtin.assert:
+    that:
+      - deploy_user is defined and deploy_user | length > 0
+      - ssh_allowed_users | length > 0
+      - not firewall_manage or firewall_allow_ssh_from_anywhere or (firewall_ssh_allowed_cidrs | length > 0)
+      - not system_toolbox_enabled or (system_toolbox_local_source is defined and system_toolbox_local_source | length > 0)
+    fail_msg: >-
+      Set ssh_allowed_users and, when managing the firewall, allow SSH from
+      somewhere before applying host hardening.
+    quiet: true
+
+- name: Ensure deploy user exists
+  ansible.builtin.user:
+    name: "{{ deploy_user }}"
+    shell: /bin/bash
+    groups: sudo
+    append: true
+    create_home: true
+
+- name: Ensure Ansible temp directory exists for deploy user
+  ansible.builtin.file:
+    path: "/home/{{ deploy_user }}/.ansible/tmp"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0755"
+
+- name: Set up authorized keys for the deploy user
+  ansible.posix.authorized_key:
+    user: "{{ deploy_user }}"
+    state: present
+    key: "{{ lookup('ansible.builtin.file', item) }}"
+  loop: "{{ ssh_deploy_pubkey_files }}"
+
+- name: Set up passwordless sudo for deploy user
+  ansible.builtin.copy:
+    content: "%{{ deploy_user }} ALL=(ALL) NOPASSWD: ALL\n"
+    dest: "/etc/sudoers.d/{{ deploy_user }}_nopasswd"
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Upgrade installed packages
+  ansible.builtin.apt:
+    upgrade: safe
+
+- name: Install base system dependencies
+  ansible.builtin.apt:
+    pkg: "{{ common_packages }}"
+    state: present
+
+- name: Install Tailscale apt key
+  ansible.builtin.get_url:
+    url: "https://pkgs.tailscale.com/stable/ubuntu/{{ ansible_facts.distribution_release }}.noarmor.gpg"
+    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    owner: root
+    group: root
+    mode: "0644"
+  when: tailscale_enabled
+
+- name: Install Tailscale apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu {{ ansible_facts.distribution_release }} main"
+    filename: tailscale
+    state: present
+    update_cache: true
+  when: tailscale_enabled
+
+- name: Install Tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+  when: tailscale_enabled
+
+- name: Ensure tailscaled is running
+  ansible.builtin.service:
+    name: tailscaled
+    enabled: true
+    state: started
+  when: tailscale_enabled
+
+- name: Join Tailscale when an auth key is provided
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - up
+      - "--auth-key={{ tailscale_auth_key }}"
+      - "--hostname={{ tailscale_hostname }}"
+  register: tailscale_up_result
+  changed_when: "'Success' in tailscale_up_result.stdout or 'Success' in tailscale_up_result.stderr"
+  when:
+    - tailscale_enabled
+    - tailscale_auth_key | length > 0
+  no_log: true
+
+- name: Enable user services for deploy user
+  ansible.builtin.command:
+    argv:
+      - loginctl
+      - enable-linger
+      - "{{ deploy_user }}"
+  changed_when: false
+  when: system_toolbox_enabled
+
+- name: Ensure system-toolbox directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0755"
+  loop:
+    - "{{ system_toolbox_dir }}"
+    - "{{ system_toolbox_dir | dirname }}"
+    - "/home/{{ deploy_user }}/.config/systemd/user"
+  when: system_toolbox_enabled
+
+- name: Sync system-toolbox source from controller
+  ansible.posix.synchronize:
+    src: "{{ system_toolbox_local_source }}/"
+    dest: "{{ system_toolbox_dir }}/"
+    delete: true
+    rsync_opts:
+      - "--exclude=.git/"
+      - "--exclude=.venv/"
+      - "--exclude=.coverage"
+      - "--exclude=.pytest_cache/"
+      - "--exclude=.ruff_cache/"
+      - "--exclude=__pycache__/"
+  delegate_to: localhost
+  become: false
+  when: system_toolbox_enabled
+
+- name: Set system-toolbox source ownership
+  ansible.builtin.file:
+    path: "{{ system_toolbox_dir }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    recurse: true
+  when: system_toolbox_enabled
+
+- name: Install uv for deploy user
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if ! command -v /home/{{ deploy_user }}/.local/bin/uv >/dev/null 2>&1; then
+      curl -LsSf https://astral.sh/uv/install.sh | sh
+    fi
+  args:
+    executable: /bin/bash
+  become_user: "{{ deploy_user }}"
+  when: system_toolbox_enabled
+
+- name: Sync system-toolbox dependencies
+  ansible.builtin.command:
+    argv:
+      - "{{ system_toolbox_uv_path }}"
+      - sync
+  args:
+    chdir: "{{ system_toolbox_dir }}"
+  become_user: "{{ deploy_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ deploy_user_uid }}"
+  changed_when: false
+  when: system_toolbox_enabled
+
+- name: Install system-toolbox user service
+  ansible.builtin.template:
+    src: system-toolbox.service.j2
+    dest: "/home/{{ deploy_user }}/.config/systemd/user/system-toolbox.service"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0644"
+  when: system_toolbox_enabled
+
+- name: Reload deploy user systemd
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - daemon-reload
+  become_user: "{{ deploy_user }}"
+  changed_when: false
+  when: system_toolbox_enabled
+
+- name: Enable and start system-toolbox user service
+  ansible.builtin.systemd:
+    name: system-toolbox
+    scope: user
+    enabled: true
+    state: started
+  become_user: "{{ deploy_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ deploy_user_uid }}"
+  when: system_toolbox_enabled
+
+- name: Validate pinned GitLab CLI configuration
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.architecture == "x86_64"
+      - glab_version | length > 0
+      - glab_deb_url | length > 0
+    quiet: true
+  when: glab_manage
+
+- name: Download pinned GitLab CLI package
+  ansible.builtin.get_url:
+    url: "{{ glab_deb_url }}"
+    dest: "/tmp/glab_{{ glab_version }}_linux_amd64.deb"
+    mode: "0644"
+  when: glab_manage
+
+- name: Install pinned GitLab CLI
+  ansible.builtin.apt:
+    deb: "/tmp/glab_{{ glab_version }}_linux_amd64.deb"
+    state: present
+  when: glab_manage
+
+- name: Install sshd hardening drop-in
+  ansible.builtin.template:
+    src: sshd_hardening.conf.j2
+    dest: "{{ ssh_hardening_config_path }}"
+    mode: "0644"
+  notify: Restart ssh
+
+- name: Ensure sshd privilege separation directory exists
+  ansible.builtin.file:
+    path: /run/sshd
+    state: directory
+    mode: "0755"
+
+- name: Validate sshd configuration
+  ansible.builtin.command: /usr/sbin/sshd -t
+  changed_when: false
+
+- name: Ensure journald drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    mode: "0755"
+
+- name: Cap journald disk usage
+  ansible.builtin.template:
+    src: journald.conf.j2
+    dest: "{{ journald_config_path }}"
+    mode: "0644"
+  notify: Restart journald
+
+- name: Install Fail2ban honeypot filter
+  ansible.builtin.template:
+    src: honeypot.conf.j2
+    dest: "{{ fail2ban_honeypot_filter_path }}"
+    mode: "0644"
+  notify: Restart fail2ban
+  when: fail2ban_honeypot_enabled
+
+- name: Install Fail2ban SSH and optional honeypot jails
+  ansible.builtin.template:
+    src: fail2ban.local.j2
+    dest: "{{ fail2ban_jail_path }}"
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Ensure fail2ban is enabled
+  ansible.builtin.service:
+    name: fail2ban
+    enabled: true
+    state: started
+
+- name: Set UFW default incoming policy
+  community.general.ufw:
+    direction: incoming
+    default: "{{ firewall_default_incoming_policy }}"
+  when: firewall_manage
+
+- name: Set UFW default outgoing policy
+  community.general.ufw:
+    direction: outgoing
+    default: "{{ firewall_default_outgoing_policy }}"
+  when: firewall_manage
+
+- name: Enable UFW logging
+  community.general.ufw:
+    logging: "{{ firewall_logging }}"
+  when: firewall_manage
+
+- name: Allow public web ports through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    comment: Public web traffic
+  loop: "{{ firewall_public_tcp_ports }}"
+  when: firewall_manage
+
+- name: Allow system-toolbox on Tailscale only
+  community.general.ufw:
+    rule: allow
+    interface: tailscale0
+    direction: in
+    port: "{{ system_toolbox_port }}"
+    proto: tcp
+    comment: system-toolbox tailnet
+  when:
+    - firewall_manage
+    - tailscale_enabled
+    - system_toolbox_enabled
+
+- name: Allow SSH from anywhere
+  community.general.ufw:
+    rule: allow
+    port: "{{ firewall_ssh_port }}"
+    proto: tcp
+    comment: SSH access
+  when:
+    - firewall_manage
+    - firewall_allow_ssh_from_anywhere
+
+- name: Allow SSH from configured CIDRs
+  community.general.ufw:
+    rule: allow
+    port: "{{ firewall_ssh_port }}"
+    proto: tcp
+    src: "{{ item }}"
+    comment: SSH access
+  loop: "{{ firewall_ssh_allowed_cidrs }}"
+  when:
+    - firewall_manage
+    - not firewall_allow_ssh_from_anywhere
+
+- name: Remove legacy public TCP rules
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    delete: true
+  loop: "{{ firewall_remove_tcp_ports }}"
+  when: firewall_manage
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+  when: firewall_manage

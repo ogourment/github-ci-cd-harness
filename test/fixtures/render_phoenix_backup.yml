@@ -1,0 +1,29 @@
+---
+- name: Render the Phoenix backup script for integration testing
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    app_name: backup_contract
+    app_root: "{{ lookup('ansible.builtin.env', 'BACKUP_CONTRACT_APP_ROOT') }}"
+    app_env_file: "{{ lookup('ansible.builtin.env', 'BACKUP_CONTRACT_ENV_FILE') }}"
+    app_current_color_file: "{{ lookup('ansible.builtin.env', 'BACKUP_CONTRACT_COLOR_FILE') }}"
+    backup_root: "{{ lookup('ansible.builtin.env', 'BACKUP_CONTRACT_ROOT') }}"
+    backup_pg_dump_bin: "{{ lookup('ansible.builtin.env', 'BACKUP_CONTRACT_PG_DUMP') }}"
+    backup_keep_recent: 3
+    backup_keep_daily_days: 7
+    backup_keep_weekly_days: 28
+    phoenix_uploads_dir: "{{ lookup('ansible.builtin.env', 'BACKUP_CONTRACT_UPLOADS_ROOT') }}"
+    phoenix_uploads_env_var: BACKUP_CONTRACT_UPLOADS_DIR
+  tasks:
+    - name: Render the exact role template
+      ansible.builtin.template:
+        src: "{{ lookup('ansible.builtin.env', 'BACKUP_CONTRACT_TEMPLATE') }}"
+        dest: "{{ lookup('ansible.builtin.env', 'BACKUP_CONTRACT_SCRIPT') }}"
+        mode: "0755"
+
+    - name: Render the exact restore template
+      ansible.builtin.template:
+        src: "{{ lookup('ansible.builtin.env', 'BACKUP_CONTRACT_RESTORE_TEMPLATE') }}"
+        dest: "{{ lookup('ansible.builtin.env', 'BACKUP_CONTRACT_RESTORE_SCRIPT') }}"
+        mode: "0755"

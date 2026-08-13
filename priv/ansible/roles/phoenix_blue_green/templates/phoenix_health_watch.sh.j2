@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+#
+# Recurring readiness and public-smoke watchdog for the committed color.
+# Managed by Ansible at {{ app_health_watch_script }} — do not edit by hand.
+#
+set -euo pipefail
+
+APP="{{ app_name }}"
+DEPLOY_ENV="{{ deploy_env }}"
+DEPLOY_USER="{{ deploy_user }}"
+CURRENT_COLOR_FILE="{{ app_current_color_file }}"
+NGINX_UPSTREAM_FILE="{{ nginx_upstream_include }}"
+NGINX_UPSTREAM_NAME="{{ nginx_upstream_name }}"
+NOTIFY_SCRIPT="{{ telegram_notify_script }}"
+HISTORY_PATH="{{ app_failure_history_path }}"
+STATE_DIR="{{ app_health_watch_state_dir }}"
+OPERATION_LOCK_PATH="{{ deploy_operation_lock_path }}"
+
+PORT_BLUE="{{ app_port_blue }}"
+PORT_GREEN="{{ app_port_green }}"
+HEALTH_PATH="{{ deploy_health_path }}"
+PUBLIC_BASE_URL="{{ deploy_public_base_url }}"
+PUBLIC_SMOKE_PATH="{{ deploy_public_smoke_path }}"
+PUBLIC_SMOKE_CONTENT_TYPE="{{ deploy_public_smoke_content_type }}"
+PUBLIC_SMOKE_TIMEOUT_SEC={{ deploy_public_smoke_timeout_sec }}
+FAILURE_THRESHOLD={{ app_health_watch_failure_threshold }}
+ACTION_COOLDOWN_SEC={{ app_health_watch_action_cooldown_sec }}
+STANDBY_UNIT="{{ app_name }}-standby-end"
+UPSTREAM_MAX_FAILS={{ nginx_upstream_max_fails }}
+UPSTREAM_FAIL_TIMEOUT="{{ nginx_upstream_fail_timeout }}"
+
+mkdir -p "${STATE_DIR}" "$(dirname "${OPERATION_LOCK_PATH}")"
+exec 9>"${OPERATION_LOCK_PATH}"
+if ! flock -n 9; then
+  echo "Health watch skipped: another ${APP} operation owns ${OPERATION_LOCK_PATH}."
+  exit 0
+fi
+
+CURRENT_COLOR="$(cat "${CURRENT_COLOR_FILE}")"
+case "${CURRENT_COLOR}" in
+  blue)
+    CURRENT_PORT="${PORT_BLUE}"
+    STANDBY_COLOR="green"
+    STANDBY_PORT="${PORT_GREEN}"
+    ;;
+  green)
+    CURRENT_PORT="${PORT_GREEN}"
+    STANDBY_COLOR="blue"
+    STANDBY_PORT="${PORT_BLUE}"
+    ;;
+  *)
+    echo "Invalid committed color: ${CURRENT_COLOR}" >&2
+    exit 2
+    ;;
+esac
+
+CURRENT_SERVICE="${APP}@${CURRENT_COLOR}.service"
+STANDBY_SERVICE="${APP}@${STANDBY_COLOR}.service"
+FAILURE_COUNT_FILE="${STATE_DIR}/consecutive-failures"
+LAST_ACTION_FILE="${STATE_DIR}/last-action"
+
+probe_committed_color() {
+  probe_failure=""
+  readiness_body="$(mktemp)"
+  if ! readiness_status="$(
+    curl --silent --show-error \
+      --connect-timeout 2 \
+      --max-time 3 \
+      --output "${readiness_body}" \
+      --write-out '%{http_code}' \
+      "http://127.0.0.1:${CURRENT_PORT}${HEALTH_PATH}" 2>/dev/null
+  )"; then
+    readiness_status="transport"
+  fi
+  if [[ "${readiness_status}" != 2* ]]; then
+    probe_failure="direct readiness ${readiness_status}"
+    rm -f "${readiness_body}"
+    return 1
+  fi
+  readiness_color="$(jq -r '.color // empty' "${readiness_body}" 2>/dev/null || true)"
+  rm -f "${readiness_body}"
+  if [[ "${readiness_color}" != "${CURRENT_COLOR}" ]]; then
+    probe_failure="direct readiness color ${readiness_color:-missing}; expected ${CURRENT_COLOR}"
+    return 1
+  fi
+
+  public_readiness_body="$(mktemp)"
+  if ! public_readiness_status="$(
+    curl --silent --show-error \
+      --connect-timeout 2 \
+      --max-time 3 \
+      --output "${public_readiness_body}" \
+      --write-out '%{http_code}' \
+      "${PUBLIC_BASE_URL%/}${HEALTH_PATH}" 2>/dev/null
+  )"; then
+    public_readiness_status="transport"
+  fi
+  if [[ "${public_readiness_status}" != 2* ]]; then
+    probe_failure="public readiness ${public_readiness_status}"
+    rm -f "${public_readiness_body}"
+    return 1
+  fi
+  public_readiness_color="$(jq -r '.color // empty' "${public_readiness_body}" 2>/dev/null || true)"
+  rm -f "${public_readiness_body}"
+  if [[ "${public_readiness_color}" != "${CURRENT_COLOR}" ]]; then
+    probe_failure="public readiness color ${public_readiness_color:-missing}; expected ${CURRENT_COLOR}"
+    return 1
+  fi
+
+  smoke_headers="$(mktemp)"
+  smoke_body="$(mktemp)"
+  if ! smoke_status="$(
+    curl --silent --show-error --location \
+      --connect-timeout "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
+      --max-time "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
+      --dump-header "${smoke_headers}" \
+      --output "${smoke_body}" \
+      --write-out '%{http_code}' \
+      "${PUBLIC_BASE_URL%/}${PUBLIC_SMOKE_PATH}" 2>/dev/null
+  )"; then
+    smoke_status="transport"
+  fi
+  smoke_content_type="$(
+    grep -i '^Content-Type:' "${smoke_headers}" 2>/dev/null |
+      tail -1 |
+      cut -d: -f2- |
+      sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' |
+      tr -d '\r' ||
+      true
+  )"
+  if [[ "${smoke_status}" != 2* ]]; then
+    probe_failure="public smoke ${smoke_status}"
+  elif [[ "${smoke_content_type}" != "${PUBLIC_SMOKE_CONTENT_TYPE}"* ]]; then
+    probe_failure="public smoke content-type ${smoke_content_type:-missing}"
+  elif ! grep -Eqi '<!doctype html|<html([[:space:]>])' "${smoke_body}"; then
+    probe_failure="public smoke missing HTML document"
+  fi
+  rm -f "${smoke_headers}" "${smoke_body}"
+  [[ -z "${probe_failure}" ]]
+}
+
+if probe_committed_color; then
+  rm -f "${FAILURE_COUNT_FILE}" "${LAST_ACTION_FILE}"
+  exit 0
+fi
+
+failure_count="$(cat "${FAILURE_COUNT_FILE}" 2>/dev/null || echo 0)"
+[[ "${failure_count}" =~ ^[0-9]+$ ]] || failure_count=0
+failure_count=$((failure_count + 1))
+printf '%s\n' "${failure_count}" > "${FAILURE_COUNT_FILE}"
+echo "Health watch failure ${failure_count}/${FAILURE_THRESHOLD}: ${probe_failure}."
+if (( failure_count < FAILURE_THRESHOLD )); then
+  exit 0
+fi
+
+now="$(date -u +%s)"
+last_action="$(cat "${LAST_ACTION_FILE}" 2>/dev/null || echo 0)"
+if [[ "${last_action}" =~ ^[0-9]+$ ]] &&
+  (( now - last_action < ACTION_COOLDOWN_SEC )); then
+  echo "Health watch action suppressed by ${ACTION_COOLDOWN_SEC}s cooldown."
+  exit 0
+fi
+printf '%s\n' "${now}" > "${LAST_ACTION_FILE}"
+
+write_live_only_upstream() {
+  local live_port="$1"
+  local candidate previous
+  candidate="$(mktemp)"
+  previous="$(mktemp)"
+
+  {
+    printf 'upstream %s {\n' "${NGINX_UPSTREAM_NAME}"
+    printf '    server 127.0.0.1:%s;\n' "${live_port}"
+{% if nginx_upstream_keepalive | int > 0 %}
+    printf '    keepalive {{ nginx_upstream_keepalive }};\n'
+{% endif %}
+    printf '}\n'
+  } > "${candidate}"
+  chmod 0644 "${candidate}"
+  cp "${NGINX_UPSTREAM_FILE}" "${previous}"
+  mv "${candidate}" "${NGINX_UPSTREAM_FILE}"
+  if ! nginx -t; then
+    cp "${previous}" "${NGINX_UPSTREAM_FILE}"
+    rm -f "${previous}"
+    echo "NGINX rejected health-watch upstream" >&2
+    return 1
+  fi
+  rm -f "${previous}"
+  nginx -s reload
+}
+
+append_event() {
+  local action="$1"
+  local destination_color="$2"
+  local recorded_at
+  [[ -n "${HISTORY_PATH}" ]] || return 0
+
+  recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  mkdir -p "$(dirname "${HISTORY_PATH}")"
+  jq -cn \
+    --arg recorded_at "${recorded_at}" \
+    --arg event "health_watch" \
+    --arg environment "${DEPLOY_ENV}" \
+    --arg color "${CURRENT_COLOR}" \
+    --arg destination_color "${destination_color}" \
+    --arg action "${action}" \
+    --arg reason "${probe_failure}" \
+    --arg failure_count "${failure_count}" \
+    '{recorded_at: $recorded_at, event: $event, environment: $environment,
+      color: $color, destination_color: $destination_color, action: $action,
+      reason: $reason, failure_count: ($failure_count | tonumber)}' \
+    >> "${HISTORY_PATH}"
+  chown "${DEPLOY_USER}:${DEPLOY_USER}" "${HISTORY_PATH}"
+  chmod 0640 "${HISTORY_PATH}"
+}
+
+html_escape() {
+  printf '%s' "$1" |
+    sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+notify_action() {
+  local action="$1"
+  local destination_color="$2"
+  local message
+  message="$(
+    printf '🚨 <b>[%s] %s health recovery</b>\n' "${DEPLOY_ENV}" "${APP}"
+    printf 'Reason: <code>%s</code>\n' "$(html_escape "${probe_failure}")"
+    printf 'Action: <code>%s</code>\n' "$(html_escape "${action}")"
+    printf 'Color: <code>%s</code>' "$(html_escape "${destination_color}")"
+  )"
+  TELEGRAM_SILENT=false "${NOTIFY_SCRIPT}" "${message}"
+}
+
+if ! standby_status="$(
+  curl --silent --show-error \
+    --connect-timeout 2 \
+    --max-time 3 \
+    --output /dev/null \
+    --write-out '%{http_code}' \
+    "http://127.0.0.1:${STANDBY_PORT}${HEALTH_PATH}" 2>/dev/null
+)"; then
+  standby_status="transport"
+fi
+
+if systemctl is-active --quiet "${STANDBY_SERVICE}" &&
+  [[ "${standby_status}" == 2* ]]; then
+  systemctl stop "${STANDBY_UNIT}.timer" "${STANDBY_UNIT}.service" 2>/dev/null || true
+  systemctl reset-failed "${STANDBY_UNIT}.timer" "${STANDBY_UNIT}.service" 2>/dev/null || true
+  write_live_only_upstream "${STANDBY_PORT}"
+  printf '%s\n' "${STANDBY_COLOR}" > "${CURRENT_COLOR_FILE}"
+  chown "${DEPLOY_USER}:${DEPLOY_USER}" "${CURRENT_COLOR_FILE}"
+  systemctl stop "${CURRENT_SERVICE}" || true
+  append_event "failed over to healthy standby" "${STANDBY_COLOR}"
+  notify_action "failed over to healthy standby" "${STANDBY_COLOR}"
+else
+  systemctl restart "${CURRENT_SERVICE}"
+  append_event "restarted active service; no healthy standby" "${CURRENT_COLOR}"
+  notify_action "restarted active service; no healthy standby" "${CURRENT_COLOR}"
+fi

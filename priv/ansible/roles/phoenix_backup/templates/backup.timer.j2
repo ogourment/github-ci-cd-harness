@@ -1,0 +1,11 @@
+[Unit]
+Description=Scheduled backup for {{ app_name }}
+
+[Timer]
+OnCalendar={{ backup_timer_on_calendar }}
+RandomizedDelaySec={{ backup_timer_randomized_delay_sec }}
+Persistent=true
+Unit={{ backup_service_unit }}
+
+[Install]
+WantedBy=timers.target

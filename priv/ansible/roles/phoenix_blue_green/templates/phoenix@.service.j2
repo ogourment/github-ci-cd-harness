@@ -1,0 +1,20 @@
+[Unit]
+Description={{ app_name }} ({{ app_name }}@%i)
+After=network.target postgresql.service
+{% if app_service_on_failure %}
+OnFailure={{ app_service_on_failure }}
+{% endif %}
+
+[Service]
+User={{ deploy_user }}
+WorkingDirectory={{ app_root }}/%i
+{% for environment_file in app_service_environment_files %}
+EnvironmentFile={{ environment_file }}
+{% endfor %}
+ExecStart={{ app_service_exec_start }}
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

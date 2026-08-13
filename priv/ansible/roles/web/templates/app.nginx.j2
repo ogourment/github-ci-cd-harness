@@ -1,0 +1,165 @@
+map $http_upgrade ${{ nginx_connection_upgrade_var }} {
+    default upgrade;
+    ''      '';
+}
+
+server {
+    listen 80;
+    server_name {{ server_name }}{% for alias in server_aliases %} {{ alias }}{% endfor %};
+    server_tokens off;
+
+    {% if ssl_enabled %}
+    location / {
+        return 301 https://{{ server_name }}$request_uri;
+    }
+    {% else %}
+    # HTTP-only configuration used while Certbot obtains the initial certificate.
+    {% if nginx_uploads_dir %}
+    location ^~ {{ nginx_uploads_url_prefix }}/ {
+        alias {{ nginx_uploads_dir }}/;
+        autoindex off;
+        add_header X-Content-Type-Options nosniff always;
+        limit_except GET HEAD { deny all; }
+    }
+    {% endif %}
+
+    location / {
+        proxy_pass http://{{ nginx_upstream_name }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection ${{ nginx_connection_upgrade_var }};
+        proxy_connect_timeout {{ nginx_proxy_connect_timeout }};
+        proxy_read_timeout {{ nginx_proxy_read_timeout }};
+        proxy_send_timeout {{ nginx_proxy_send_timeout }};
+        proxy_next_upstream {{ nginx_proxy_next_upstream }};
+        proxy_next_upstream_tries {{ nginx_proxy_next_upstream_tries }};
+    }
+    {% endif %}
+}
+
+{% if ssl_enabled %}
+{% for alias in server_aliases %}
+server {
+    listen 443 ssl http2;
+    server_name {{ alias }};
+    server_tokens off;
+
+    ssl_certificate /etc/letsencrypt/live/{{ server_name }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ server_name }}/privkey.pem;
+
+    return 301 https://{{ server_name }}$request_uri;
+}
+
+{% endfor %}
+server {
+    listen 443 ssl http2;
+    server_name {{ server_name }};
+    server_tokens off;
+
+    ssl_certificate /etc/letsencrypt/live/{{ server_name }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ server_name }}/privkey.pem;
+
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_min_length 256;
+    gzip_static on;
+    gzip_types
+        application/atom+xml
+        application/javascript
+        application/json
+        application/ld+json
+        application/manifest+json
+        application/rss+xml
+        application/vnd.ms-fontobject
+        application/wasm
+        application/x-font-ttf
+        application/x-web-app-manifest+json
+        application/xhtml+xml
+        application/xml
+        font/eot
+        font/opentype
+        font/otf
+        font/ttf
+        image/bmp
+        image/svg+xml
+        image/x-icon
+        text/cache-manifest
+        text/css
+        text/javascript
+        text/plain
+        text/vcard
+        text/vnd.rim.location.xloc
+        text/vtt
+        text/x-component
+        text/x-cross-domain-policy;
+
+    {% if nginx_drop_scanner_probes %}
+    # Reject common scanner probes before they reach the application.
+    location = /.env {
+        access_log off;
+        log_not_found off;
+        return 404;
+    }
+
+    location ~ /\.(?!well-known) {
+        access_log off;
+        log_not_found off;
+        return 404;
+    }
+
+    location ~* \.php(?:/|$) {
+        access_log off;
+        log_not_found off;
+        return 404;
+    }
+
+    location ~* ^/(wp-admin|wp-content|wp-includes|wp-json|wordpress|xmlrpc\.php|vendor/phpunit|phpmyadmin|pma|cgi-bin|boaform|manager/html|server-status|actuator) {
+        access_log off;
+        log_not_found off;
+        return 404;
+    }
+
+    # This application does not expose the WordPress REST API.  Reject its
+    # common path and query-string fallback before either reaches Phoenix.
+    if ($arg_rest_route != "") {
+        return 404;
+    }
+
+    {% endif %}
+
+    {% if nginx_https_extra_locations %}
+{{ nginx_https_extra_locations | indent(4, true) }}
+
+    {% endif %}
+    {% if nginx_uploads_dir %}
+    location ^~ {{ nginx_uploads_url_prefix }}/ {
+        alias {{ nginx_uploads_dir }}/;
+        autoindex off;
+        add_header X-Content-Type-Options nosniff always;
+        limit_except GET HEAD { deny all; }
+    }
+    {% endif %}
+
+    location / {
+        proxy_pass http://{{ nginx_upstream_name }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection ${{ nginx_connection_upgrade_var }};
+        proxy_connect_timeout {{ nginx_proxy_connect_timeout }};
+        proxy_read_timeout {{ nginx_proxy_read_timeout }};
+        proxy_send_timeout {{ nginx_proxy_send_timeout }};
+        proxy_next_upstream {{ nginx_proxy_next_upstream }};
+        proxy_next_upstream_tries {{ nginx_proxy_next_upstream_tries }};
+    }
+}
+{% endif %}

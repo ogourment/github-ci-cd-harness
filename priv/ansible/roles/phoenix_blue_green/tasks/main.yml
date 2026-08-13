@@ -1,0 +1,260 @@
+---
+# Two-instance zero-downtime blue/green runtime for a Phoenix release host.
+# Assumes nginx + postgres are provisioned by other roles (phoenix_postgres and
+# an nginx role); this role owns the systemd instances, per-color env, the
+# deploy/rollback/notify helpers, the current_color pointer, and the nginx
+# upstream include that the deploy script flips.
+- name: Validate required blue/green variables
+  ansible.builtin.assert:
+    that:
+      - app_name is defined and app_name | length > 0
+      - otp_app_name is defined and otp_app_name | length > 0
+      - deploy_user is defined and deploy_user | length > 0
+      - secret_key_base is defined and secret_key_base | length > 0
+      - release_migrate_module is defined and release_migrate_module | length > 0
+      - deploy_release_artifact_kind in ['directory', 'archive']
+      - deploy_slot_layout in ['symlink', 'directory']
+      - app_slot_env_file_template is search('%s')
+      - app_slot_metadata_env_file_template | length == 0 or app_slot_metadata_env_file_template is search('%s')
+      - nginx_upstream_keepalive | int >= 0
+      - phoenix_release_node_env_var is match('^[A-Z][A-Z0-9_]*$')
+      - phoenix_release_node_template is search('%s')
+      - (not (app_manage_failure_alert_unit | bool)) or app_service_on_failure == app_name ~ '-alert@%i.service'
+      - app_health_watch_interval_sec | int >= 0
+      - app_health_watch_failure_threshold | int > 0
+      - app_health_watch_action_cooldown_sec | int > 0
+    quiet: true
+
+- name: Ensure app root exists
+  ansible.builtin.file:
+    path: "{{ app_root }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0755"
+
+- name: Validate optional uploads configuration
+  ansible.builtin.assert:
+    that:
+      - (phoenix_uploads_dir | length > 0) == (phoenix_uploads_env_var | length > 0)
+      - phoenix_uploads_env_var | length == 0 or phoenix_uploads_env_var is match('^[A-Z][A-Z0-9_]*$')
+    quiet: true
+
+- name: Ensure shared uploads directory exists
+  ansible.builtin.file:
+    path: "{{ phoenix_uploads_dir }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0755"
+  when: phoenix_uploads_dir | length > 0
+
+- name: Install deploy script
+  ansible.builtin.template:
+    src: phoenix_deploy.sh.j2
+    dest: "{{ deploy_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install rollback script
+  ansible.builtin.template:
+    src: phoenix_rollback.sh.j2
+    dest: "{{ deploy_rollback_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install standby retirement script
+  ansible.builtin.template:
+    src: phoenix_standby_end.sh.j2
+    dest: "{{ deploy_standby_end_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install Telegram notify script
+  ansible.builtin.template:
+    src: phoenix_telegram_notify.sh.j2
+    dest: "{{ telegram_notify_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install failure capture and alert script
+  ansible.builtin.template:
+    src: phoenix_failure_alert.sh.j2
+    dest: "{{ app_failure_alert_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when: app_manage_failure_alert_unit | bool
+
+- name: Install failure capture and alert unit
+  ansible.builtin.template:
+    src: phoenix-alert@.service.j2
+    dest: "/etc/systemd/system/{{ app_name }}-alert@.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  when: app_manage_failure_alert_unit | bool
+
+- name: Install recurring health watch script
+  ansible.builtin.template:
+    src: phoenix_health_watch.sh.j2
+    dest: "{{ app_health_watch_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when: app_health_watch_interval_sec | int > 0
+
+- name: Install recurring health watch service
+  ansible.builtin.template:
+    src: phoenix-health-watch.service.j2
+    dest: "/etc/systemd/system/{{ app_name }}-health-watch.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  when: app_health_watch_interval_sec | int > 0
+
+- name: Install recurring health watch timer
+  ansible.builtin.template:
+    src: phoenix-health-watch.timer.j2
+    dest: "/etc/systemd/system/{{ app_name }}-health-watch.timer"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  when: app_health_watch_interval_sec | int > 0
+
+- name: Create per-slot environment files
+  ansible.builtin.template:
+    src: phoenix.env.j2
+    dest: "{{ app_slot_env_file_template | replace('%s', item.color) }}"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0600"
+  loop:
+    - { color: blue, port: "{{ app_port_blue }}" }
+    - { color: green, port: "{{ app_port_green }}" }
+  vars:
+    slot_port: "{{ item.port }}"
+    slot_color: "{{ item.color }}"
+  notify: Restart active color
+
+- name: Initialize per-slot deployment metadata files
+  ansible.builtin.copy:
+    dest: "{{ app_slot_metadata_env_file_template | replace('%s', item) }}"
+    content: ""
+    force: false
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0600"
+  loop:
+    - blue
+    - green
+  when: app_slot_metadata_env_file_template | length > 0
+
+- name: Verify Telegram bot and chat access
+  ansible.builtin.command:
+    argv:
+      - "{{ telegram_notify_script }}"
+      - "--verify"
+  changed_when: false
+  no_log: true
+  when: telegram_verify_on_provision | bool
+
+- name: Initialize current_color pointer (first provisioning only)
+  ansible.builtin.copy:
+    dest: "{{ app_current_color_file }}"
+    content: "green\n"
+    force: false
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0644"
+
+- name: Read committed color
+  ansible.builtin.slurp:
+    src: "{{ app_current_color_file }}"
+  register: committed_color_file
+
+- name: Validate committed color
+  ansible.builtin.assert:
+    that:
+      - (committed_color_file.content | b64decode | trim) in ['blue', 'green']
+    quiet: true
+
+- name: Reconcile nginx upstream include with the committed color
+  ansible.builtin.copy:
+    dest: "{{ nginx_upstream_include }}"
+    content: |
+      upstream {{ nginx_upstream_name }} {
+          server 127.0.0.1:{% if (committed_color_file.content | b64decode | trim) == 'blue' %}{{ app_port_blue }}{% else %}{{ app_port_green }}{% endif %};
+      {% if nginx_upstream_keepalive | int > 0 %}
+          keepalive {{ nginx_upstream_keepalive }};
+      {% endif %}
+      }
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Install systemd template unit
+  ansible.builtin.template:
+    src: phoenix@.service.j2
+    dest: "/etc/systemd/system/{{ app_name }}@.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Enable both color instances
+  ansible.builtin.systemd:
+    name: "{{ app_name }}@{{ item }}.service"
+    enabled: true
+    daemon_reload: true
+  loop:
+    - blue
+    - green
+  failed_when: false
+
+- name: Check for a deployed release in either color
+  ansible.builtin.stat:
+    path: "{{ app_root }}/{{ item }}/bin/{{ otp_app_name }}"
+  register: color_release_bins
+  loop:
+    - blue
+    - green
+
+- name: Start the active color when a release exists
+  ansible.builtin.systemd:
+    name: "{{ app_name }}@{{ item.item }}.service"
+    state: started
+  loop: "{{ color_release_bins.results }}"
+  when:
+    - item.stat.exists
+    - item.item == (committed_color_file.content | b64decode | trim)
+  failed_when: false
+
+- name: Enable recurring health watch timer
+  ansible.builtin.systemd:
+    name: "{{ app_name }}-health-watch.timer"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - app_health_watch_interval_sec | int > 0
+    - not ansible_check_mode
+
+- name: Disable recurring health watch timer when monitoring is off
+  ansible.builtin.systemd:
+    name: "{{ app_name }}-health-watch.timer"
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  failed_when: false
+  when:
+    - app_health_watch_interval_sec | int == 0
+    - not ansible_check_mode

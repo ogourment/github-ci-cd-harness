@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PG_RESTORE_BIN="{{ backup_pg_restore_bin | default('pg_restore') }}"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  restore verify SNAPSHOT
+  restore database SNAPSHOT
+  restore uploads SNAPSHOT EMPTY_TARGET_DIRECTORY
+  restore all SNAPSHOT EMPTY_TARGET_DIRECTORY
+
+database and all require RESTORE_DATABASE_URL to identify an existing empty
+database. uploads restoration refuses a non-empty target directory.
+EOF
+  exit 2
+}
+
+verify_tar_paths() {
+  local archive="$1"
+  local entry
+  while IFS= read -r entry; do
+    case "$entry" in
+      /*|..|../*|*/../*|*/..)
+        printf 'unsafe uploads archive path: %s\n' "$entry" >&2
+        return 1
+        ;;
+    esac
+  done < <(tar -tzf "$archive")
+}
+
+metadata_value() {
+  local snapshot="$1"
+  local key="$2"
+  sed -n "s/^${key}=//p" "${snapshot}/metadata.env" | tail -n 1
+}
+
+verify_snapshot() {
+  local snapshot="$1"
+  local format_version uploads_included
+  test -d "$snapshot" || { printf 'snapshot not found: %s\n' "$snapshot" >&2; return 1; }
+  (
+    cd "$snapshot"
+    sha256sum -c SHA256SUMS
+    "$PG_RESTORE_BIN" --list database.dump >/dev/null
+  )
+
+  format_version="$(metadata_value "$snapshot" BACKUP_FORMAT_VERSION)"
+  uploads_included="$(metadata_value "$snapshot" BACKUP_UPLOADS_INCLUDED)"
+  test "$format_version" = 2 || {
+    printf 'unsupported backup format: %s\n' "${format_version:-legacy}" >&2
+    return 1
+  }
+
+  if [[ "$uploads_included" == true ]]; then
+    test -f "${snapshot}/uploads.tar.gz" || {
+      printf 'snapshot metadata requires uploads.tar.gz\n' >&2
+      return 1
+    }
+    verify_tar_paths "${snapshot}/uploads.tar.gz"
+  fi
+}
+
+restore_database() {
+  local snapshot="$1"
+  local restore_database_url
+  : "${RESTORE_DATABASE_URL:?RESTORE_DATABASE_URL must identify an existing empty database}"
+  restore_database_url="${RESTORE_DATABASE_URL/#ecto:\/\//postgresql://}"
+  "$PG_RESTORE_BIN" \
+    --exit-on-error \
+    --no-owner \
+    --no-privileges \
+    --dbname "$restore_database_url" \
+    "${snapshot}/database.dump"
+}
+
+restore_uploads() {
+  local snapshot="$1"
+  local target="$2"
+  local uploads_included
+
+  uploads_included="$(metadata_value "$snapshot" BACKUP_UPLOADS_INCLUDED)"
+  [[ "$uploads_included" == true ]] || {
+    printf 'snapshot does not contain persistent uploads\n' >&2
+    return 1
+  }
+
+  if [[ -e "$target" && ! -d "$target" ]]; then
+    printf 'uploads restore target is not a directory: %s\n' "$target" >&2
+    return 1
+  fi
+  if [[ -d "$target" ]] && find "$target" -mindepth 1 -print -quit | grep -q .; then
+    printf 'uploads restore target must be empty: %s\n' "$target" >&2
+    return 1
+  fi
+
+  mkdir -p "$target"
+  tar \
+    --extract \
+    --gzip \
+    --file "${snapshot}/uploads.tar.gz" \
+    --directory "$target" \
+    --no-same-owner \
+    --no-same-permissions
+}
+
+command_name="${1:-}"
+snapshot="${2:-}"
+[[ -n "$command_name" && -n "$snapshot" ]] || usage
+snapshot="$(readlink -f "$snapshot")"
+
+command -v "$PG_RESTORE_BIN" >/dev/null 2>&1 || {
+  printf 'missing restore dependency: %s\n' "$PG_RESTORE_BIN" >&2
+  exit 1
+}
+command -v sha256sum >/dev/null 2>&1 || {
+  printf 'missing restore dependency: sha256sum\n' >&2
+  exit 1
+}
+command -v tar >/dev/null 2>&1 || {
+  printf 'missing restore dependency: tar\n' >&2
+  exit 1
+}
+
+verify_snapshot "$snapshot"
+
+case "$command_name" in
+  verify)
+    ;;
+  database)
+    restore_database "$snapshot"
+    ;;
+  uploads)
+    [[ $# -eq 3 ]] || usage
+    restore_uploads "$snapshot" "$3"
+    ;;
+  all)
+    [[ $# -eq 3 ]] || usage
+    restore_database "$snapshot"
+    restore_uploads "$snapshot" "$3"
+    ;;
+  *)
+    usage
+    ;;
+esac
+
+printf 'backup restore command completed: %s\n' "$command_name"

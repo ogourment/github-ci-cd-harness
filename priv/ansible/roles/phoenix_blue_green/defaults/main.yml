@@ -1,0 +1,98 @@
+---
+# Two-instance zero-downtime blue/green for a Phoenix release host.
+# Sensible defaults; the consumer (inventory/group_vars) must still set the
+# app identity + secrets (app_name, otp_app_name, secret_key_base, db_*, ...).
+
+# Ports the two color instances bind to (nginx upstream flips between them).
+app_port_blue: 4000
+app_port_green: 4001
+app_bind_ip: "127.0.0.1"
+
+# Filesystem layout (derived from app_name unless overridden).
+app_root: "/opt/{{ app_name }}"
+app_env_file: "/etc/default/{{ app_name }}"
+app_slot_env_file_template: "{{ app_env_file }}_%s"
+# Optional separate file for deploy-written release/Git/pipeline identity.
+# Existing consumers retain the historical single-file behavior when empty.
+app_slot_metadata_env_file_template: ""
+app_current_color_file: "{{ app_root }}/current_color"
+deploy_releases_root: "/home/{{ deploy_user }}/releases"
+deploy_script_path: "/usr/local/bin/{{ app_name }}_deploy"
+deploy_rollback_script_path: "/usr/local/bin/{{ app_name }}_rollback"
+deploy_standby_end_script: "/usr/local/bin/{{ app_name }}_standby_end"
+telegram_notify_script: "/usr/local/bin/{{ app_name }}_telegram_notify"
+telegram_verify_on_provision: false
+deploy_release_artifact_kind: "directory"
+deploy_slot_layout: "symlink"
+deploy_archive_strip_components: 1
+release_seed_after_migrate: true
+deployment_history_path: ""
+deploy_operation_lock_path: "/run/lock/{{ app_name }}-operations.lock"
+
+# systemd template unit base name ({{ app_name }}@blue / @green).
+app_service_name: "{{ app_name }}"
+app_service_environment_files:
+  - "{{ app_slot_env_file_template | replace('%s', '%i') }}"
+app_service_exec_start: "{{ app_root }}/%i/bin/{{ otp_app_name }} start"
+app_service_on_failure: ""
+app_manage_failure_alert_unit: false
+app_failure_alert_script: "/usr/local/bin/{{ app_name }}_failure_alert"
+app_failure_history_path: ""
+app_failure_alert_cooldown_sec: 300
+app_failure_journal_lines: 40
+app_failure_history_max_bytes: 10485760
+
+# Optional recurring readiness + public smoke monitor. Disabled unless the
+# consumer explicitly chooses a polling interval.
+app_health_watch_interval_sec: 0
+app_health_watch_failure_threshold: 3
+app_health_watch_action_cooldown_sec: 300
+app_health_watch_script: "/usr/local/bin/{{ app_name }}_health_watch"
+app_health_watch_state_dir: "/var/lib/{{ app_name }}/health-watch"
+
+# Cutover tuning.
+deploy_health_path: "/health"
+deploy_health_timeout_sec: 60
+deploy_drain_sec: 5
+# Opt in only after confirming that the previous release remains compatible
+# with the migrated schema and cannot duplicate unsafe scheduled/background
+# work while both colors run.
+deploy_standby_sec: 0
+deploy_public_base_url: "https://{{ server_name }}"
+deploy_public_identity_path: "{{ deploy_health_path }}"
+deploy_public_smoke_path: "/"
+deploy_public_smoke_content_type: "text/html"
+deploy_public_smoke_timeout_sec: 15
+
+# nginx upstream include the deploy script rewrites to flip colors.
+nginx_upstream_name: "{{ app_name }}_upstream"
+nginx_upstream_include: "/etc/nginx/conf.d/{{ app_name }}_upstream.conf"
+nginx_upstream_max_fails: 1
+nginx_upstream_fail_timeout: "5s"
+nginx_upstream_keepalive: 0
+
+# App-facing env var names for the deploy env + live color, so the app can
+# surface them (e.g. in /health, which the deploy health-check reads). Keep the
+# defaults unless the app already reads app-prefixed names.
+phoenix_env_indicator_var: "DEPLOY_ENV"
+phoenix_color_env_var: "DEPLOY_COLOR"
+# Written into the target slot immediately before it starts, so the deployed
+# health endpoint can prove which immutable release served the response.
+phoenix_release_id_env_var: "DEPLOY_RELEASE_ID"
+phoenix_pipeline_id_env_var: "DEPLOY_CI_PIPELINE_ID"
+phoenix_release_node_env_var: "RELEASE_NODE"
+phoenix_release_node_template: "{{ otp_app_name }}_%s"
+deploy_env: "production"
+
+# Extra, app-specific env lines appended verbatim to each color's env file
+# (BREVO/STRIPE/... for ecojeux). Multi-line string; rendered as-is.
+phoenix_env_extra: ""
+
+# Optional shared writable directory exposed to the release through a named
+# environment variable. Both values must be set together by consumers.
+phoenix_uploads_dir: ""
+phoenix_uploads_env_var: ""
+
+# Optional: after a successful cutover, eval a release hook to record the
+# deployment. Set true and provide release_migrate_module.record_deployment/4.
+phoenix_deploy_record: false

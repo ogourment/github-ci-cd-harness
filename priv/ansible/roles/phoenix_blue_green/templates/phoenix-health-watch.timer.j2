@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll {{ app_name }} readiness and public smoke
+
+[Timer]
+OnBootSec={{ app_health_watch_interval_sec }}s
+OnUnitActiveSec={{ app_health_watch_interval_sec }}s
+AccuracySec=1s
+RandomizedDelaySec=2s
+
+[Install]
+WantedBy=timers.target

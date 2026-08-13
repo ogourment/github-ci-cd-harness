@@ -1,0 +1,21 @@
+[DEFAULT]
+bantime = {{ fail2ban_sshd_bantime }}
+findtime = {{ fail2ban_sshd_findtime }}
+maxretry = {{ fail2ban_sshd_maxretry }}
+
+[sshd]
+enabled = true
+backend = systemd
+port = ssh
+{% if fail2ban_honeypot_enabled %}
+
+[{{ fail2ban_honeypot_name }}]
+enabled = true
+backend = systemd
+filter = {{ fail2ban_honeypot_filter_name }}
+banaction = ufw
+journalmatch = SYSLOG_IDENTIFIER={{ otp_app_name }}
+maxretry = {{ fail2ban_honeypot_maxretry }}
+findtime = {{ fail2ban_honeypot_findtime }}
+bantime = {{ fail2ban_honeypot_bantime }}
+{% endif %}

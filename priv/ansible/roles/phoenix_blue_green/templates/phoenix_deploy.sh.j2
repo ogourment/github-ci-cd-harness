@@ -1,0 +1,636 @@
+#!/usr/bin/env bash
+#
+# Two-instance zero-downtime blue/green deploy for {{ app_name }}.
+# Managed by Ansible at {{ deploy_script_path }} — do not edit by hand.
+#
+# Directory artifact usage:
+#   sudo {{ deploy_script_path }} <release_id> [migrate]
+# Archive artifact usage:
+#   sudo {{ deploy_script_path }} <archive_path> <release_id> [migrate]
+#
+# Flow: stage release into the idle color → migrate → start → readiness check
+# (version + color via {{ deploy_health_path }}) → candidate nginx cutover →
+# public identity + HTML smoke → commit color → bounded standby → prune.
+#
+set -euo pipefail
+
+OTP_APP="{{ otp_app_name }}"
+MIGRATE_MODULE="{{ release_migrate_module }}"
+STAGE_ROOT="{{ app_root }}"
+DEPLOY_USER="{{ deploy_user }}"
+SERVICE_BASE="{{ app_name }}"
+NGINX_UPSTREAM_FILE="{{ nginx_upstream_include }}"
+NGINX_UPSTREAM_NAME="{{ nginx_upstream_name }}"
+CURRENT_COLOR_FILE="{{ app_current_color_file }}"
+ENV_FILE_BASE="{{ app_env_file }}"
+SLOT_ENV_FILE_TEMPLATE="{{ app_slot_env_file_template }}"
+SLOT_METADATA_ENV_FILE_TEMPLATE="{{ app_slot_metadata_env_file_template }}"
+RELEASE_ID_ENV_VAR="{{ phoenix_release_id_env_var }}"
+PIPELINE_ID_ENV_VAR="{{ phoenix_pipeline_id_env_var }}"
+ARTIFACT_KIND="{{ deploy_release_artifact_kind }}"
+SLOT_LAYOUT="{{ deploy_slot_layout }}"
+ARCHIVE_STRIP_COMPONENTS={{ deploy_archive_strip_components }}
+
+PORT_BLUE="{{ app_port_blue }}"
+PORT_GREEN="{{ app_port_green }}"
+
+HEALTH_PATH="{{ deploy_health_path }}"
+HEALTH_TIMEOUT_SEC={{ deploy_health_timeout_sec }}
+HEALTH_INTERVAL_SEC=2
+DRAIN_SEC={{ deploy_drain_sec }}
+STANDBY_SEC={{ deploy_standby_sec }}
+STANDBY_END_SCRIPT="{{ deploy_standby_end_script }}"
+STANDBY_UNIT="{{ app_name }}-standby-end"
+OPERATION_LOCK_PATH="{{ deploy_operation_lock_path }}"
+
+UPSTREAM_MAX_FAILS={{ nginx_upstream_max_fails }}
+UPSTREAM_FAIL_TIMEOUT="{{ nginx_upstream_fail_timeout }}"
+
+PUBLIC_BASE_URL="{{ deploy_public_base_url }}"
+PUBLIC_IDENTITY_PATH="{{ deploy_public_identity_path }}"
+PUBLIC_SMOKE_PATH="{{ deploy_public_smoke_path }}"
+PUBLIC_SMOKE_CONTENT_TYPE="{{ deploy_public_smoke_content_type }}"
+PUBLIC_SMOKE_TIMEOUT_SEC={{ deploy_public_smoke_timeout_sec }}
+
+mkdir -p "$(dirname "${OPERATION_LOCK_PATH}")"
+exec 9>"${OPERATION_LOCK_PATH}"
+flock 9
+
+case "${ARTIFACT_KIND}" in
+  directory)
+    RELEASE_ID="${1:?release id required}"
+    RUN_MIGRATIONS="${2:-}"
+    SRC_DIR="{{ deploy_releases_root }}/${RELEASE_ID}"
+    ARCHIVE_PATH=""
+    ;;
+  archive)
+    ARCHIVE_PATH="${1:?archive path required}"
+    RELEASE_ID="${2:?release id required}"
+    RUN_MIGRATIONS="${3:-}"
+    SRC_DIR=""
+    ;;
+  *)
+    echo "ERROR: unsupported artifact kind '${ARTIFACT_KIND}'" >&2
+    exit 1
+    ;;
+esac
+
+slot_env_file() {
+  local color="$1"
+  printf '%s\n' "${SLOT_ENV_FILE_TEMPLATE/\%s/${color}}"
+}
+
+slot_metadata_env_file() {
+  local color="$1"
+  if [[ -n "${SLOT_METADATA_ENV_FILE_TEMPLATE}" ]]; then
+    printf '%s\n' "${SLOT_METADATA_ENV_FILE_TEMPLATE/\%s/${color}}"
+  else
+    slot_env_file "${color}"
+  fi
+}
+
+# --- Deploy notifications (best-effort; never break the deploy) --------------
+DEPLOY_ENV="{{ deploy_env }}"
+NOTIFY_SCRIPT="{{ telegram_notify_script }}"
+REMOTE_ENV_PREFIX="{{ remote_env_prefix | default(otp_app_name | upper) }}"
+DEPLOY_STARTED_EPOCH="$(date -u +%s)"
+
+GIT_SHA_ENV_VAR="${REMOTE_ENV_PREFIX}_GIT_SHA"
+GIT_REF_ENV_VAR="${REMOTE_ENV_PREFIX}_GIT_REF"
+GIT_SUBJECT_ENV_VAR="${REMOTE_ENV_PREFIX}_GIT_SUBJECT"
+GIT_MESSAGES_ENV_VAR="${REMOTE_ENV_PREFIX}_GIT_MESSAGES"
+PIPELINE_URL_ENV_VAR="${REMOTE_ENV_PREFIX}_CI_PIPELINE_URL"
+DEPLOYED_AT_ENV_VAR="${REMOTE_ENV_PREFIX}_DEPLOYED_AT"
+
+metadata_value() {
+  local name="${REMOTE_ENV_PREFIX}_$1"
+  local value="${!name:-}"
+  [[ -n "${value}" ]] && printf '%s' "${value}" || printf '%s' "${2:-}"
+}
+
+# The slot file is both a systemd EnvironmentFile and sourced by deployment
+# hooks. Bash's %q format keeps metadata data-only for both consumers, even
+# when a commit subject contains shell metacharacters.
+append_runtime_env() {
+  local name="$1"
+  local value="$2"
+  local file="$3"
+
+  printf '%s=' "${name}" >> "${file}"
+  printf '%q' "${value}" >> "${file}"
+  printf '\n' >> "${file}"
+}
+
+APP_DISPLAY_NAME="$(metadata_value APP_NAME "{{ app_name }}")"
+APP_VERSION="$(metadata_value APP_VERSION unknown)"
+GIT_SHA="$(metadata_value GIT_SHA "")"
+GIT_REF="$(metadata_value GIT_REF "")"
+GIT_SUBJECT="$(metadata_value GIT_SUBJECT "")"
+GIT_MESSAGES="$(metadata_value GIT_MESSAGES "")"
+ACTOR="$(metadata_value DEPLOY_ACTOR "${USER:-unknown}")"
+CI_PIPELINE_ID="$(metadata_value CI_PIPELINE_ID "${CI_PIPELINE_ID:-unknown}")"
+CI_PIPELINE_URL="$(metadata_value CI_PIPELINE_URL "")"
+HOST_DEPLOY_NOTIFY="$(metadata_value HOST_DEPLOY_NOTIFY true)"
+DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+if [[ "${CI_PIPELINE_ID}" == "unknown" || -z "${CI_PIPELINE_ID}" ]]; then
+  release_pipeline_id="${RELEASE_ID##*-}"
+  if [[ "${release_pipeline_id}" =~ ^[0-9]+$ ]]; then
+    CI_PIPELINE_ID="${release_pipeline_id}"
+  fi
+fi
+
+if [[ "${CI_PIPELINE_ID}" == "unknown" || -z "${CI_PIPELINE_ID}" ]]; then
+  echo "ERROR: cannot determine pipeline identity from deploy metadata or release ${RELEASE_ID}" >&2
+  exit 1
+fi
+
+html_escape() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+notify() {
+  [[ -x "${NOTIFY_SCRIPT}" ]] || return 0
+  TELEGRAM_SILENT="${2:-true}" "${NOTIFY_SCRIPT}" "$1" >/dev/null 2>&1 || true
+}
+
+deploy_summary() {
+  local secs=$(( $(date -u +%s) - DEPLOY_STARTED_EPOCH ))
+  printf 'Release: <code>%s</code>\nColor: <code>%s</code>\nActor: <code>%s</code>\nPipeline: <code>%s</code>\nDeploy: <code>%ss</code>' \
+    "$(html_escape "${RELEASE_ID}")" "$(html_escape "${TARGET_COLOR:-?}")" \
+    "$(html_escape "${ACTOR}")" "$(html_escape "${CI_PIPELINE_ID}")" "${secs}"
+}
+
+deploy_failure_message() {
+  local status="$1"
+  printf '❌ <b>[%s] %s deploy failed</b>\nStatus: <code>%s</code>\n%s' \
+    "${DEPLOY_ENV}" "${APP_DISPLAY_NAME}" "${status}" "$(deploy_summary)"
+}
+
+deploy_success_message() {
+  printf '✅ <b>[%s] %s deployed</b>\n%s' \
+    "${DEPLOY_ENV}" "${APP_DISPLAY_NAME}" "$(deploy_summary)"
+}
+
+on_deploy_error() {
+  local status="$?"
+  # Deployment failures always notify, even when CI owns success notices.
+  notify "$(deploy_failure_message "${status}")" false
+  exit "${status}"
+}
+trap on_deploy_error ERR
+
+cancel_standby_timer() {
+  systemctl stop "${STANDBY_UNIT}.timer" "${STANDBY_UNIT}.service" 2>/dev/null || true
+  systemctl reset-failed "${STANDBY_UNIT}.timer" "${STANDBY_UNIT}.service" 2>/dev/null || true
+}
+
+write_upstream() {
+  local live_port="$1"
+  local standby_port="${2:-}"
+  local candidate previous had_previous=false
+
+  candidate="$(mktemp)"
+  previous="$(mktemp)"
+
+  {
+    printf 'upstream %s {\n' "${NGINX_UPSTREAM_NAME}"
+    if [[ -n "${standby_port}" ]]; then
+      printf '    server 127.0.0.1:%s max_fails=%s fail_timeout=%s;\n' \
+        "${live_port}" "${UPSTREAM_MAX_FAILS}" "${UPSTREAM_FAIL_TIMEOUT}"
+      printf '    server 127.0.0.1:%s backup max_fails=%s fail_timeout=%s;\n' \
+        "${standby_port}" "${UPSTREAM_MAX_FAILS}" "${UPSTREAM_FAIL_TIMEOUT}"
+    else
+      printf '    server 127.0.0.1:%s;\n' "${live_port}"
+    fi
+{% if nginx_upstream_keepalive | int > 0 %}
+    printf '    keepalive {{ nginx_upstream_keepalive }};\n'
+{% endif %}
+    printf '}\n'
+  } > "${candidate}"
+  chmod 0644 "${candidate}"
+
+  if [[ -f "${NGINX_UPSTREAM_FILE}" ]]; then
+    cp "${NGINX_UPSTREAM_FILE}" "${previous}"
+    had_previous=true
+  fi
+
+  mv "${candidate}" "${NGINX_UPSTREAM_FILE}"
+  if ! nginx -t; then
+    if [[ "${had_previous}" == "true" ]]; then
+      cp "${previous}" "${NGINX_UPSTREAM_FILE}"
+    else
+      rm -f "${NGINX_UPSTREAM_FILE}"
+    fi
+    rm -f "${previous}"
+    echo "ERROR: nginx rejected candidate upstream configuration" >&2
+    return 1
+  fi
+
+  rm -f "${previous}"
+  nginx -s reload
+}
+
+json_value() {
+  local file="$1"
+  local key="$2"
+  sed -nE "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" "${file}" | tail -1
+}
+
+verify_identity_file() {
+  local file="$1"
+  local actual_version actual_color actual_release_id actual_pipeline_id
+
+  actual_version="$(json_value "${file}" version)"
+  actual_color="$(json_value "${file}" color)"
+  actual_release_id="$(json_value "${file}" release_id)"
+  actual_pipeline_id="$(json_value "${file}" pipeline_id)"
+
+  if [[ "${actual_version}" == "${EXPECTED_VERSION}" &&
+        "${actual_color}" == "${TARGET_COLOR}" &&
+        "${actual_release_id}" == "${RELEASE_ID}" &&
+        "${actual_pipeline_id}" == "${CI_PIPELINE_ID}" ]]; then
+    return 0
+  fi
+
+  printf '%s\n' \
+    "ERROR: candidate identity mismatch" \
+    "  expected: version=${EXPECTED_VERSION} color=${TARGET_COLOR} release_id=${RELEASE_ID} pipeline_id=${CI_PIPELINE_ID}" \
+    "  actual:   version=${actual_version:-<missing>} color=${actual_color:-<missing>} release_id=${actual_release_id:-<missing>} pipeline_id=${actual_pipeline_id:-<missing>}" >&2
+  return 1
+}
+
+restore_current_upstream() {
+  local current_port
+  case "${CURRENT_COLOR}" in
+    blue) current_port="${PORT_BLUE}" ;;
+    green) current_port="${PORT_GREEN}" ;;
+  esac
+
+  echo "==> Restoring nginx upstream to current ${CURRENT_COLOR}..."
+  write_upstream "${current_port}"
+}
+
+verify_public_candidate() {
+  local smoke_url identity_url smoke_body smoke_headers identity_body
+  local status_code content_type
+
+  smoke_url="${PUBLIC_BASE_URL%/}${PUBLIC_SMOKE_PATH}"
+  identity_url="${PUBLIC_BASE_URL%/}${PUBLIC_IDENTITY_PATH}"
+  smoke_body="$(mktemp)"
+  smoke_headers="$(mktemp)"
+  identity_body="$(mktemp)"
+
+  echo "==> Verifying public HTML smoke ${smoke_url}..."
+  if ! status_code="$(curl --silent --show-error --location \
+    --connect-timeout "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
+    --max-time "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
+    --dump-header "${smoke_headers}" \
+    --output "${smoke_body}" \
+    --write-out '%{http_code}' \
+    "${smoke_url}")"; then
+    rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+    return 1
+  fi
+
+  case "${status_code}" in
+    2??) ;;
+    *)
+      echo "ERROR: public smoke expected 2xx from ${smoke_url}, got ${status_code}" >&2
+      rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+      return 1
+      ;;
+  esac
+
+  content_type="$(
+    grep -i '^Content-Type:' "${smoke_headers}" |
+      tail -1 |
+      cut -d: -f2- |
+      sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' |
+      tr -d '\r' || true
+  )"
+  if [[ "${content_type}" != "${PUBLIC_SMOKE_CONTENT_TYPE}"* ]]; then
+    echo "ERROR: public smoke expected Content-Type ${PUBLIC_SMOKE_CONTENT_TYPE}, got ${content_type:-<missing>}" >&2
+    rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+    return 1
+  fi
+  if ! grep -Eqi '<!doctype html|<html([[:space:]>])' "${smoke_body}"; then
+    echo "ERROR: public smoke expected an HTML document from ${smoke_url}" >&2
+    rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+    return 1
+  fi
+
+  echo "==> Verifying public candidate identity ${identity_url}..."
+  if ! curl --fail --silent --show-error --location \
+    --connect-timeout "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
+    --max-time "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
+    --output "${identity_body}" \
+    "${identity_url}" ||
+    ! verify_identity_file "${identity_body}"; then
+    rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+    return 1
+  fi
+
+  rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+}
+
+# --- Pick idle color ---------------------------------------------------------
+if [[ -f "${CURRENT_COLOR_FILE}" ]]; then
+  CURRENT_COLOR="$(cat "${CURRENT_COLOR_FILE}")"
+else
+  CURRENT_COLOR="green"   # first deploy → target blue
+fi
+case "${CURRENT_COLOR}" in
+  blue)  TARGET_COLOR="green"; TARGET_PORT="${PORT_GREEN}" ;;
+  green) TARGET_COLOR="blue" ; TARGET_PORT="${PORT_BLUE}"  ;;
+  *) echo "ERROR: invalid current_color '${CURRENT_COLOR}'" >&2; exit 1 ;;
+esac
+
+case "${SLOT_LAYOUT}" in
+  symlink) RELEASE_DIR="${STAGE_ROOT}/releases/${RELEASE_ID}" ;;
+  directory) RELEASE_DIR="${STAGE_ROOT}/${TARGET_COLOR}" ;;
+  *) echo "ERROR: unsupported slot layout '${SLOT_LAYOUT}'" >&2; exit 1 ;;
+esac
+TARGET_LINK="${STAGE_ROOT}/${TARGET_COLOR}"
+TARGET_SERVICE="${SERVICE_BASE}@${TARGET_COLOR}.service"
+CURRENT_SERVICE="${SERVICE_BASE}@${CURRENT_COLOR}.service"
+
+echo "==> Release     : ${RELEASE_ID}"
+echo "==> Live color  : ${CURRENT_COLOR}"
+echo "==> Target color: ${TARGET_COLOR} (port ${TARGET_PORT})"
+
+case "${ARTIFACT_KIND}" in
+  directory)
+    [[ -d "${SRC_DIR}" ]] || { echo "ERROR: source ${SRC_DIR} missing" >&2; exit 1; }
+    ;;
+  archive)
+    [[ -f "${ARCHIVE_PATH}" ]] || { echo "ERROR: archive ${ARCHIVE_PATH} missing" >&2; exit 1; }
+    ARCHIVE_SHA256="$(sha256sum "${ARCHIVE_PATH}" | awk '{print $1}')"
+    ;;
+esac
+ARCHIVE_SHA256="${ARCHIVE_SHA256:-}"
+
+cancel_standby_timer
+if [[ "${STANDBY_SEC}" -gt 0 && -f "${CURRENT_COLOR_FILE}" ]]; then
+  if ! systemctl is-active --quiet "${CURRENT_SERVICE}"; then
+    echo "ERROR: current ${CURRENT_COLOR} service is not active; restore service or run rollback before deploying" >&2
+    exit 1
+  fi
+  PHOENIX_OPERATION_LOCK_HELD=1 "${STANDBY_END_SCRIPT}"
+fi
+
+echo "==> Staging release..."
+case "${SLOT_LAYOUT}" in
+  symlink)
+    CURRENT_RELEASE_DIR="$(readlink -f "${STAGE_ROOT}/${CURRENT_COLOR}" 2>/dev/null || true)"
+    if [[ "${CURRENT_RELEASE_DIR}" == "${RELEASE_DIR}" && -d "${RELEASE_DIR}" ]]; then
+      echo "==> Reusing live release directory for exact-release retry"
+    else
+      rm -rf "${RELEASE_DIR}"
+      mkdir -p "${RELEASE_DIR}"
+      case "${ARTIFACT_KIND}" in
+        directory) rsync -a --delete "${SRC_DIR}/" "${RELEASE_DIR}/" ;;
+        archive) tar -xzf "${ARCHIVE_PATH}" --strip-components="${ARCHIVE_STRIP_COMPONENTS}" -C "${RELEASE_DIR}" ;;
+      esac
+      chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "${RELEASE_DIR}"
+    fi
+    ;;
+  directory)
+    candidate_dir="${STAGE_ROOT}/.${TARGET_COLOR}.${RELEASE_ID}.candidate"
+    previous_dir="${STAGE_ROOT}/${TARGET_COLOR}.previous"
+    rm -rf "${candidate_dir}"
+    mkdir -p "${candidate_dir}"
+    case "${ARTIFACT_KIND}" in
+      directory) rsync -a --delete "${SRC_DIR}/" "${candidate_dir}/" ;;
+      archive) tar -xzf "${ARCHIVE_PATH}" --strip-components="${ARCHIVE_STRIP_COMPONENTS}" -C "${candidate_dir}" ;;
+    esac
+    chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "${candidate_dir}"
+    rm -rf "${previous_dir}"
+    if [[ -d "${RELEASE_DIR}" ]]; then
+      mv "${RELEASE_DIR}" "${previous_dir}"
+    fi
+    mv "${candidate_dir}" "${RELEASE_DIR}"
+    ;;
+esac
+
+STATIC_SRC=""
+for dir in "${RELEASE_DIR}/lib/${OTP_APP}-"*/priv/static; do
+  [[ -d "$dir" ]] && { STATIC_SRC="$dir"; break; }
+done
+[[ -n "${STATIC_SRC}" ]] && ln -sfn "${STATIC_SRC}" "${RELEASE_DIR}/static_assets" \
+  || echo "WARNING: no static assets under ${RELEASE_DIR}/lib/${OTP_APP}-*/priv/static"
+
+if [[ "${SLOT_LAYOUT}" == "symlink" ]]; then
+  echo "==> Pointing ${TARGET_COLOR} → ${RELEASE_ID}"
+  ln -sfn "${RELEASE_DIR}" "${TARGET_LINK}"
+fi
+
+# The systemd unit reads its environment from the per-slot file, not this
+# deploy process. Keep the release identifier alongside the static slot
+# metadata before starting the target so readiness can attest the cutover.
+TARGET_ENV_FILE="$(slot_env_file "${TARGET_COLOR}")"
+TARGET_METADATA_ENV_FILE="$(slot_metadata_env_file "${TARGET_COLOR}")"
+tmp_env="$(mktemp)"
+grep -Ev "^(${RELEASE_ID_ENV_VAR}|${PIPELINE_ID_ENV_VAR}|${GIT_SHA_ENV_VAR}|${GIT_REF_ENV_VAR}|${GIT_SUBJECT_ENV_VAR}|${GIT_MESSAGES_ENV_VAR}|${PIPELINE_URL_ENV_VAR}|${DEPLOYED_AT_ENV_VAR})=" "${TARGET_METADATA_ENV_FILE}" > "${tmp_env}" || true
+append_runtime_env "${RELEASE_ID_ENV_VAR}" "${RELEASE_ID}" "${tmp_env}"
+append_runtime_env "${PIPELINE_ID_ENV_VAR}" "${CI_PIPELINE_ID}" "${tmp_env}"
+append_runtime_env "${GIT_SHA_ENV_VAR}" "${GIT_SHA}" "${tmp_env}"
+append_runtime_env "${GIT_REF_ENV_VAR}" "${GIT_REF}" "${tmp_env}"
+append_runtime_env "${GIT_SUBJECT_ENV_VAR}" "${GIT_SUBJECT}" "${tmp_env}"
+append_runtime_env "${GIT_MESSAGES_ENV_VAR}" "${GIT_MESSAGES}" "${tmp_env}"
+append_runtime_env "${PIPELINE_URL_ENV_VAR}" "${CI_PIPELINE_URL}" "${tmp_env}"
+append_runtime_env "${DEPLOYED_AT_ENV_VAR}" "${DEPLOYED_AT}" "${tmp_env}"
+chown "{{ deploy_user }}:{{ deploy_user }}" "${tmp_env}"
+chmod 600 "${tmp_env}"
+mv "${tmp_env}" "${TARGET_METADATA_ENV_FILE}"
+
+if [[ "${RUN_MIGRATIONS}" == "migrate" ]]; then
+  echo "==> Running migrations (must be backward-compatible with ${CURRENT_COLOR})..."
+  sudo -u "${DEPLOY_USER}" bash -lc "
+    set -euo pipefail
+    set -a
+    [[ -f '${TARGET_ENV_FILE}' ]] && source '${TARGET_ENV_FILE}'
+    [[ -f '${TARGET_METADATA_ENV_FILE}' ]] && source '${TARGET_METADATA_ENV_FILE}'
+    set +a
+    cd '${RELEASE_DIR}'
+    MIX_ENV=prod 'bin/${OTP_APP}' eval '${MIGRATE_MODULE}.migrate()'
+  "
+{% if release_seed_after_migrate %}
+  echo "==> Running release seeds..."
+  sudo -u "${DEPLOY_USER}" bash -lc "
+    set -euo pipefail
+    set -a
+    [[ -f '${TARGET_ENV_FILE}' ]] && source '${TARGET_ENV_FILE}'
+    [[ -f '${TARGET_METADATA_ENV_FILE}' ]] && source '${TARGET_METADATA_ENV_FILE}'
+    set +a
+    cd '${RELEASE_DIR}'
+    MIX_ENV=prod 'bin/${OTP_APP}' eval '${MIGRATE_MODULE}.seed()'
+  "
+{% endif %}
+fi
+
+echo "==> Starting ${TARGET_SERVICE}..."
+systemctl restart "${TARGET_SERVICE}"
+
+EXPECTED_VERSION="$(ls "${RELEASE_DIR}/releases/" 2>/dev/null | head -1 || true)"
+[[ -n "${EXPECTED_VERSION}" ]] || { echo "ERROR: cannot determine release version" >&2; exit 1; }
+
+echo "==> Readiness-checking http://127.0.0.1:${TARGET_PORT}${HEALTH_PATH} (version=${EXPECTED_VERSION}, color=${TARGET_COLOR}, release=${RELEASE_ID}, pipeline=${CI_PIPELINE_ID})..."
+deadline=$(( $(date +%s) + HEALTH_TIMEOUT_SEC ))
+readiness_body="$(mktemp)"
+while true; do
+  if curl --fail --silent --show-error --max-time 2 \
+    --output "${readiness_body}" \
+    "http://127.0.0.1:${TARGET_PORT}${HEALTH_PATH}" &&
+    verify_identity_file "${readiness_body}"; then
+    echo "    ${TARGET_COLOR} ready: version=${EXPECTED_VERSION}, release=${RELEASE_ID}, pipeline=${CI_PIPELINE_ID}"
+    break
+  fi
+  if [[ $(date +%s) -ge ${deadline} ]]; then
+    rm -f "${readiness_body}"
+    echo "ERROR: ${TARGET_COLOR} failed readiness after ${HEALTH_TIMEOUT_SEC}s; ${CURRENT_COLOR} still live." >&2
+    systemctl stop "${TARGET_SERVICE}" || true
+    exit 1
+  fi
+  sleep "${HEALTH_INTERVAL_SEC}"
+done
+rm -f "${readiness_body}"
+
+case "${CURRENT_COLOR}" in
+  blue) CURRENT_PORT="${PORT_BLUE}" ;;
+  green) CURRENT_PORT="${PORT_GREEN}" ;;
+esac
+
+echo "==> Candidate cutover: ${TARGET_COLOR} primary, ${CURRENT_COLOR} backup..."
+write_upstream "${TARGET_PORT}" "${CURRENT_PORT}"
+
+if ! verify_public_candidate; then
+  echo "ERROR: candidate failed public verification; aborting cutover and fixing forward is required" >&2
+  restore_current_upstream
+  systemctl stop "${TARGET_SERVICE}" || true
+  exit 1
+fi
+
+echo "${TARGET_COLOR}" > "${CURRENT_COLOR_FILE}"
+chown "${DEPLOY_USER}:${DEPLOY_USER}" "${CURRENT_COLOR_FILE}"
+
+{% if phoenix_deploy_record %}
+echo "==> Recording deployment timeline entry..."
+CI_DEPLOY_COMMIT_MESSAGES_B64="$(printf '%s' "${GIT_MESSAGES}" | base64 -w 0)"
+sudo -u "${DEPLOY_USER}" env \
+  CI_COMMIT_SHA="${GIT_SHA}" \
+  CI_COMMIT_TITLE="${GIT_SUBJECT}" \
+  CI_DEPLOY_COMMIT_MESSAGES="${GIT_MESSAGES}" \
+  CI_DEPLOY_COMMIT_MESSAGES_B64="${CI_DEPLOY_COMMIT_MESSAGES_B64}" \
+  CI_PIPELINE_URL="${CI_PIPELINE_URL}" \
+  bash -lc "
+  set -euo pipefail
+  set -a
+  [[ -f '${TARGET_ENV_FILE}' ]] && source '${TARGET_ENV_FILE}'
+  [[ -f '${TARGET_METADATA_ENV_FILE}' ]] && source '${TARGET_METADATA_ENV_FILE}'
+  set +a
+  cd '${RELEASE_DIR}'
+  MIX_ENV=prod 'bin/${OTP_APP}' eval '${MIGRATE_MODULE}.record_deployment(\"${RELEASE_ID}\", \"${DEPLOY_ENV}\", \"${TARGET_COLOR}\", \"${EXPECTED_VERSION}\")'
+" || echo "WARNING: deployment timeline entry could not be recorded"
+{% endif %}
+
+{% if deployment_history_path %}
+echo "==> Recording host deployment history..."
+HISTORY_PATH="{{ deployment_history_path }}"
+mkdir -p "$(dirname "${HISTORY_PATH}")"
+jq -cn \
+  --arg deployed_at "${DEPLOYED_AT}" \
+  --arg release_id "${RELEASE_ID}" \
+  --arg environment "${DEPLOY_ENV}" \
+  --arg slot "${TARGET_COLOR}" \
+  --arg app_version "${APP_VERSION}" \
+  --arg git_sha "${GIT_SHA}" \
+  --arg git_ref "${GIT_REF}" \
+  --arg git_subject "${GIT_SUBJECT}" \
+  --arg git_messages "${GIT_MESSAGES}" \
+  --arg actor "${ACTOR}" \
+  --arg archive_sha256 "${ARCHIVE_SHA256}" \
+  '{deployed_at: $deployed_at, environment: $environment, release_id: $release_id,
+    app_version: $app_version, git_sha: $git_sha, git_ref: $git_ref,
+    git_subject: $git_subject,
+    git_messages: ($git_messages | split("\n") | map(select(length > 0))),
+    slot: $slot, actor: $actor, archive_sha256: $archive_sha256}' \
+  >> "${HISTORY_PATH}" ||
+  echo "WARNING: host deployment history could not be recorded"
+chown "${DEPLOY_USER}:${DEPLOY_USER}" "${HISTORY_PATH}"
+chmod 0640 "${HISTORY_PATH}"
+{% endif %}
+
+if [[ "${CURRENT_COLOR}" != "${TARGET_COLOR}" ]] && systemctl is-active --quiet "${CURRENT_SERVICE}"; then
+  if [[ "${STANDBY_SEC}" -gt 0 ]]; then
+    echo "==> Keeping ${CURRENT_COLOR} as standby for ${STANDBY_SEC}s..."
+    if ! systemd-run \
+      --unit="${STANDBY_UNIT}" \
+      --on-active="${STANDBY_SEC}s" \
+      --property=Type=oneshot \
+      "${STANDBY_END_SCRIPT}"; then
+      echo "WARNING: standby timer could not be scheduled; retiring standby now" >&2
+      PHOENIX_OPERATION_LOCK_HELD=1 "${STANDBY_END_SCRIPT}"
+    fi
+  else
+    echo "==> Draining old ${CURRENT_COLOR} for ${DRAIN_SEC}s, then stopping..."
+    sleep "${DRAIN_SEC}"
+    write_upstream "${TARGET_PORT}"
+    systemctl stop "${CURRENT_SERVICE}" || true
+  fi
+else
+  write_upstream "${TARGET_PORT}"
+fi
+
+echo "==> Cutover complete. Active = ${TARGET_COLOR}."
+
+# --- Release pruning: keep 5 recent + 1/day for 7d + 1/week for 14d ----------
+{% raw %}
+prune_releases() {
+  local releases_dir="$1"; shift
+  local -a protected=("$@")
+  local keep_recent=5 keep_daily_days=7 keep_weekly_days=14
+  [[ -d "$releases_dir" ]] || return 0
+  local now; now=$(date +%s)
+  local -a all=()
+  while IFS= read -r entry; do all+=("$entry"); done < <(
+    find "$releases_dir" -maxdepth 1 -mindepth 1 -type d -printf '%T@ %f\n' | sort -rn | awk '{print $2}')
+  local total=${#all[@]}
+  if (( total <= keep_recent )); then echo "  ${releases_dir}: ${total} releases, nothing to prune."; return; fi
+  local -A keep=() seen_day=() seen_week=()
+  local p; for p in "${protected[@]}"; do [[ -n "$p" ]] && keep["$p"]=protected; done
+  local idx=0
+  for rel in "${all[@]}"; do
+    if (( idx < keep_recent )); then keep["$rel"]=recent; (( idx++ )) || true; continue; fi
+    (( idx++ ))
+    local mtime; mtime=$(stat -c %Y "${releases_dir}/${rel}")
+    local age_days=$(( (now - mtime) / 86400 ))
+    if (( age_days <= keep_daily_days )); then
+      local day; day=$(date -d "@${mtime}" +%Y-%m-%d)
+      [[ -z "${seen_day[$day]:-}" ]] && { seen_day["$day"]=1; keep["$rel"]=daily; }
+    elif (( age_days <= keep_weekly_days )); then
+      local week; week=$(date -d "@${mtime}" +%G-W%V)
+      [[ -z "${seen_week[$week]:-}" ]] && { seen_week["$week"]=1; keep["$rel"]=weekly; }
+    fi
+  done
+  local removed=0
+  for rel in "${all[@]}"; do
+    [[ -z "${keep[$rel]:-}" ]] && { rm -rf "${releases_dir:?}/${rel}"; (( removed++ )) || true; }
+  done
+  echo "  ${releases_dir}: pruned ${removed}/${total} (kept $((total - removed)))"
+}
+{% endraw %}
+
+if [[ "${SLOT_LAYOUT}" == "symlink" ]]; then
+  BLUE_ID="$(basename "$(readlink -f "${STAGE_ROOT}/blue" 2>/dev/null || echo /dev/null)")"
+  GREEN_ID="$(basename "$(readlink -f "${STAGE_ROOT}/green" 2>/dev/null || echo /dev/null)")"
+  echo "==> Pruning old releases..."
+  prune_releases "${STAGE_ROOT}/releases"     "${RELEASE_ID}" "${BLUE_ID}" "${GREEN_ID}"
+  prune_releases "{{ deploy_releases_root }}" "${RELEASE_ID}"
+fi
+
+# CI publishes the canonical successful deployment summary. Consumers can opt
+# into this host-side success message for deployments that are not CI-driven.
+if [[ "${HOST_DEPLOY_NOTIFY}" == "true" ]]; then
+  notify "$(deploy_success_message)" true
+fi
+trap - ERR
+echo "==> Done."
