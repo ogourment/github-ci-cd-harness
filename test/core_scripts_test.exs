@@ -22,6 +22,7 @@ defmodule CiCdHarness.CoreScriptsTest do
     notify_deployment.sh
     notify_message.sh
     release_tag.sh
+    staging_release_smoke.sh
     verify_health_identity.sh
   )
 

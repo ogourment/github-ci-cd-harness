@@ -89,6 +89,19 @@ the same provider-neutral implementation. The package includes `common`,
 `phoenix_postgres`, `phoenix_blue_green`, `web`, `phoenix_backup`, and
 `system_toolbox_identity`.
 
+## GitLab adapter
+
+GitLab consumers can include the tagged public adapter directly:
+
+```yaml
+include:
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.14/templates/gitlab/cd.yml"
+```
+
+The adapter is deliberately thin: it defines GitLab's job graph and variable
+mapping, then fetches the same tag and runs the provider-neutral scripts under
+`priv/core`. Pin the include URL and `CI_CD_HARNESS_REF` to the same release.
+
 ## Status
 
 Extracted from Agile-U's Forgejo delivery scripts, which remain in that
