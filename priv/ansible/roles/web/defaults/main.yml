@@ -12,6 +12,11 @@ nginx_legacy_site_names: []
 nginx_legacy_upstream_includes: []
 nginx_drop_scanner_probes: true
 
+# Set false on staging and any other non-production deployment. When false the
+# vhost emits X-Robots-Tag: noindex, nofollow on every response, so a review
+# environment cannot appear in search results alongside the real site.
+app_is_production: true
+
 # Proxy behavior shared by ordinary HTTP and WebSocket requests. The map
 # variable must be unique because every enabled site is included in nginx's
 # global http context.

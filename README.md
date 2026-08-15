@@ -89,15 +89,22 @@ the same provider-neutral implementation. The package includes `common`,
 `phoenix_postgres`, `phoenix_blue_green`, `web`, `phoenix_backup`, and
 `system_toolbox_identity`.
 
+## Environment badging
+
+Non-production deployments should say so. See
+[`docs/environment_badging.md`](docs/environment_badging.md) for the logo
+sticker, the per-environment favicon and its cache-busting trap, and the
+`X-Robots-Tag` the `web` role emits when `app_is_production` is false.
+
 ## GitLab adapter
 
 GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.15/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.15/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.15/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.16/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.16/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.16/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable
