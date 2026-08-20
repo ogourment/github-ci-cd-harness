@@ -40,4 +40,6 @@ jobs:
       - name: Run GitHub workflow contracts
         run: test/github_phoenix_delivery_contract_test.sh
       - name: Run backup and restore integration
+        env:
+          BACKUP_RESTORE_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
         run: test/phoenix_backup_restore_integration_test.sh
