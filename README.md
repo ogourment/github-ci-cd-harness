@@ -134,3 +134,11 @@ execute traversal on otherwise-private source parents, verifies the new `/health
 service-manager identity, and restores the legacy service automatically when
 that verification fails. Exact privileged system units and deploy-user units
 remain consumer-owned allowlists.
+# Retention policies
+
+The reusable Phoenix roles provide tiered retention for database/file
+snapshots and immutable releases. Consumers must set the policy explicitly
+after budgeting the entire physical host, including every co-located app,
+legacy release tree, logs, caches, and enough working space to create the next
+snapshot or unpack the next release. See
+[`docs/retention.md`](docs/retention.md).

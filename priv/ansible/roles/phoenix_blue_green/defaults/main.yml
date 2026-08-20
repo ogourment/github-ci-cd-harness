@@ -28,6 +28,11 @@ deploy_archive_strip_components: 1
 release_seed_after_migrate: true
 deployment_history_path: ""
 deploy_operation_lock_path: "/run/lock/{{ app_name }}-operations.lock"
+# Tiered release retention. Pruning runs before staging a new artifact so a
+# host at policy can recover space, and again after a successful cutover.
+deploy_keep_recent: 5
+deploy_keep_daily_days: 7
+deploy_keep_weekly_days: 14
 
 # systemd template unit base name ({{ app_name }}@blue / @green).
 app_service_name: "{{ app_name }}"

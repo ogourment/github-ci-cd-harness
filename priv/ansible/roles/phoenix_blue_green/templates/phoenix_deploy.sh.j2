@@ -332,6 +332,48 @@ verify_public_candidate() {
   rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
 }
 
+# --- Release pruning ---------------------------------------------------------
+RELEASE_KEEP_RECENT={{ deploy_keep_recent | int }}
+RELEASE_KEEP_DAILY_DAYS={{ deploy_keep_daily_days | int }}
+RELEASE_KEEP_WEEKLY_DAYS={{ deploy_keep_weekly_days | int }}
+{% raw %}
+prune_releases() {
+  local releases_dir="$1"; shift
+  local -a protected=("$@")
+  local keep_recent="${RELEASE_KEEP_RECENT}"
+  local keep_daily_days="${RELEASE_KEEP_DAILY_DAYS}"
+  local keep_weekly_days="${RELEASE_KEEP_WEEKLY_DAYS}"
+  [[ -d "$releases_dir" ]] || return 0
+  local now; now=$(date +%s)
+  local -a all=()
+  while IFS= read -r entry; do all+=("$entry"); done < <(
+    find "$releases_dir" -maxdepth 1 -mindepth 1 -type d -printf '%T@ %f\n' | sort -rn | awk '{print $2}')
+  local total=${#all[@]}
+  if (( total <= keep_recent )); then echo "  ${releases_dir}: ${total} releases, nothing to prune."; return; fi
+  local -A keep=() seen_day=() seen_week=()
+  local p; for p in "${protected[@]}"; do [[ -n "$p" ]] && keep["$p"]=protected; done
+  local idx=0
+  for rel in "${all[@]}"; do
+    if (( idx < keep_recent )); then keep["$rel"]=recent; (( idx++ )) || true; continue; fi
+    (( idx++ ))
+    local mtime; mtime=$(stat -c %Y "${releases_dir}/${rel}")
+    local age_days=$(( (now - mtime) / 86400 ))
+    if (( age_days <= keep_daily_days )); then
+      local day; day=$(date -d "@${mtime}" +%Y-%m-%d)
+      [[ -z "${seen_day[$day]:-}" ]] && { seen_day["$day"]=1; keep["$rel"]=daily; }
+    elif (( age_days <= keep_weekly_days )); then
+      local week; week=$(date -d "@${mtime}" +%G-W%V)
+      [[ -z "${seen_week[$week]:-}" ]] && { seen_week["$week"]=1; keep["$rel"]=weekly; }
+    fi
+  done
+  local removed=0
+  for rel in "${all[@]}"; do
+    [[ -z "${keep[$rel]:-}" ]] && { rm -rf "${releases_dir:?}/${rel}"; (( removed++ )) || true; }
+  done
+  echo "  ${releases_dir}: pruned ${removed}/${total} (kept $((total - removed)))"
+}
+{% endraw %}
+
 # --- Pick idle color ---------------------------------------------------------
 if [[ -f "${CURRENT_COLOR_FILE}" ]]; then
   CURRENT_COLOR="$(cat "${CURRENT_COLOR_FILE}")"
@@ -352,6 +394,14 @@ esac
 TARGET_LINK="${STAGE_ROOT}/${TARGET_COLOR}"
 TARGET_SERVICE="${SERVICE_BASE}@${TARGET_COLOR}.service"
 CURRENT_SERVICE="${SERVICE_BASE}@${CURRENT_COLOR}.service"
+
+if [[ "${SLOT_LAYOUT}" == "symlink" ]]; then
+  BLUE_ID="$(basename "$(readlink -f "${STAGE_ROOT}/blue" 2>/dev/null || echo /dev/null)")"
+  GREEN_ID="$(basename "$(readlink -f "${STAGE_ROOT}/green" 2>/dev/null || echo /dev/null)")"
+  echo "==> Pruning old releases before staging..."
+  prune_releases "${STAGE_ROOT}/releases" "${BLUE_ID}" "${GREEN_ID}"
+  prune_releases "{{ deploy_releases_root }}" "${BLUE_ID}" "${GREEN_ID}"
+fi
 
 echo "==> Release     : ${RELEASE_ID}"
 echo "==> Live color  : ${CURRENT_COLOR}"
@@ -582,47 +632,10 @@ fi
 
 echo "==> Cutover complete. Active = ${TARGET_COLOR}."
 
-# --- Release pruning: keep 5 recent + 1/day for 7d + 1/week for 14d ----------
-{% raw %}
-prune_releases() {
-  local releases_dir="$1"; shift
-  local -a protected=("$@")
-  local keep_recent=5 keep_daily_days=7 keep_weekly_days=14
-  [[ -d "$releases_dir" ]] || return 0
-  local now; now=$(date +%s)
-  local -a all=()
-  while IFS= read -r entry; do all+=("$entry"); done < <(
-    find "$releases_dir" -maxdepth 1 -mindepth 1 -type d -printf '%T@ %f\n' | sort -rn | awk '{print $2}')
-  local total=${#all[@]}
-  if (( total <= keep_recent )); then echo "  ${releases_dir}: ${total} releases, nothing to prune."; return; fi
-  local -A keep=() seen_day=() seen_week=()
-  local p; for p in "${protected[@]}"; do [[ -n "$p" ]] && keep["$p"]=protected; done
-  local idx=0
-  for rel in "${all[@]}"; do
-    if (( idx < keep_recent )); then keep["$rel"]=recent; (( idx++ )) || true; continue; fi
-    (( idx++ ))
-    local mtime; mtime=$(stat -c %Y "${releases_dir}/${rel}")
-    local age_days=$(( (now - mtime) / 86400 ))
-    if (( age_days <= keep_daily_days )); then
-      local day; day=$(date -d "@${mtime}" +%Y-%m-%d)
-      [[ -z "${seen_day[$day]:-}" ]] && { seen_day["$day"]=1; keep["$rel"]=daily; }
-    elif (( age_days <= keep_weekly_days )); then
-      local week; week=$(date -d "@${mtime}" +%G-W%V)
-      [[ -z "${seen_week[$week]:-}" ]] && { seen_week["$week"]=1; keep["$rel"]=weekly; }
-    fi
-  done
-  local removed=0
-  for rel in "${all[@]}"; do
-    [[ -z "${keep[$rel]:-}" ]] && { rm -rf "${releases_dir:?}/${rel}"; (( removed++ )) || true; }
-  done
-  echo "  ${releases_dir}: pruned ${removed}/${total} (kept $((total - removed)))"
-}
-{% endraw %}
-
 if [[ "${SLOT_LAYOUT}" == "symlink" ]]; then
   BLUE_ID="$(basename "$(readlink -f "${STAGE_ROOT}/blue" 2>/dev/null || echo /dev/null)")"
   GREEN_ID="$(basename "$(readlink -f "${STAGE_ROOT}/green" 2>/dev/null || echo /dev/null)")"
-  echo "==> Pruning old releases..."
+  echo "==> Pruning old releases after cutover..."
   prune_releases "${STAGE_ROOT}/releases"     "${RELEASE_ID}" "${BLUE_ID}" "${GREEN_ID}"
   prune_releases "{{ deploy_releases_root }}" "${RELEASE_ID}"
 fi

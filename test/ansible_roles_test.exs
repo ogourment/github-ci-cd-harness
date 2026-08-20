@@ -39,6 +39,19 @@ defmodule CiCdHarness.AnsibleRolesTest do
     assert File.read!(restore) =~ "BACKUP_EXCLUDED_TABLE_DATA"
   end
 
+  test "release retention is configurable and runs before and after staging" do
+    defaults = File.read!(Path.join(@roles_root, "phoenix_blue_green/defaults/main.yml"))
+    deploy = File.read!(Path.join(@roles_root, "phoenix_blue_green/templates/phoenix_deploy.sh.j2"))
+
+    assert defaults =~ "deploy_keep_recent: 5"
+    assert defaults =~ "deploy_keep_daily_days: 7"
+    assert defaults =~ "deploy_keep_weekly_days: 14"
+    assert deploy =~ "RELEASE_KEEP_RECENT={{ deploy_keep_recent | int }}"
+    assert deploy =~ ~s(local keep_recent="${RELEASE_KEEP_RECENT}")
+    assert deploy =~ "Pruning old releases before staging"
+    assert deploy =~ "Pruning old releases after cutover"
+  end
+
   test "web role keeps production indexable and marks non-production responses" do
     defaults = File.read!(Path.join(@roles_root, "web/defaults/main.yml"))
     template = File.read!(Path.join(@roles_root, "web/templates/app.nginx.j2"))
