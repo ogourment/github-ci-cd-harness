@@ -24,6 +24,7 @@ keep_recent="${BACKUP_PULL_KEEP_RECENT:-7}"
 keep_daily_days="${BACKUP_PULL_KEEP_DAILY_DAYS:-14}"
 keep_weekly_days="${BACKUP_PULL_KEEP_WEEKLY_DAYS:-56}"
 min_free_mb="${BACKUP_PULL_MIN_FREE_MB:-5120}"
+remote_rsync_path="${BACKUP_PULL_REMOTE_RSYNC_PATH:-rsync}"
 
 log() { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
@@ -41,6 +42,7 @@ fi
 partial_dir="${BACKUP_PULL_LOCAL_ROOT%/snapshots}/.partial"
 mkdir -p "$partial_dir"
 rsync_opts=(--archive --partial-dir="$partial_dir" --ignore-existing
+  --rsync-path="$remote_rsync_path"
   --exclude '*.tmp' --exclude '.*.??????'
   -e "ssh -i ${BACKUP_PULL_SSH_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes")
 (( dry_run )) && rsync_opts+=(--dry-run)
