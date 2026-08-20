@@ -1,0 +1,11 @@
+[Unit]
+Description=Pull Phoenix backup snapshots for %i
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=10m
+Persistent=true
+Unit=phoenix-backup-pull@%i.service
+
+[Install]
+WantedBy=timers.target

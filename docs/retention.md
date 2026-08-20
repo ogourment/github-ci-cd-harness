@@ -77,3 +77,9 @@ Host-local retention is not a disaster-recovery copy. Production deployments
 should have an encrypted off-host copy, a monitored transfer schedule, and a
 tested restore path. Shortening host-local retention is acceptable only when
 the required recovery history remains available and verified elsewhere.
+
+Install `priv/operator/phoenix-backup-pull` and its templated user units on an
+operator-controlled host. Create one
+`~/.config/phoenix-backup-pull/<instance>.env` per application from the example,
+then enable `phoenix-backup-pull@<instance>.timer`. The pull model gives the
+deployment host no credential capable of deleting the off-host history.

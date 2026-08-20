@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+config="${1:-}"
+if [[ -z "$config" || ! -f "$config" ]]; then
+  echo "usage: phoenix-backup-pull CONFIG.env [--dry-run]" >&2
+  exit 2
+fi
+shift
+dry_run=0
+[[ "${1:-}" == "--dry-run" ]] && dry_run=1
+
+set -a
+# shellcheck source=/dev/null
+. "$config"
+set +a
+
+: "${BACKUP_PULL_REMOTE:?required}"
+: "${BACKUP_PULL_REMOTE_ROOT:?required}"
+: "${BACKUP_PULL_LOCAL_ROOT:?required}"
+: "${BACKUP_PULL_SSH_KEY:?required}"
+
+keep_recent="${BACKUP_PULL_KEEP_RECENT:-7}"
+keep_daily_days="${BACKUP_PULL_KEEP_DAILY_DAYS:-14}"
+keep_weekly_days="${BACKUP_PULL_KEEP_WEEKLY_DAYS:-56}"
+min_free_mb="${BACKUP_PULL_MIN_FREE_MB:-5120}"
+
+log() { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+mkdir -p "$BACKUP_PULL_LOCAL_ROOT"
+lock_id="$(printf '%s' "$BACKUP_PULL_LOCAL_ROOT" | sha256sum | cut -c1-16)"
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/phoenix-backup-pull-${lock_id}.lock"
+flock -n 9 || { log "another pull is already running"; exit 0; }
+
+avail_mb="$(df -Pm "$BACKUP_PULL_LOCAL_ROOT" | awk 'NR==2 {print $4}')"
+if (( avail_mb < min_free_mb )); then
+  log "ERROR: ${avail_mb}MB free; ${min_free_mb}MB required"
+  exit 1
+fi
+
+partial_dir="${BACKUP_PULL_LOCAL_ROOT%/snapshots}/.partial"
+mkdir -p "$partial_dir"
+rsync_opts=(--archive --partial-dir="$partial_dir" --ignore-existing
+  --exclude '*.tmp' --exclude '.*.??????'
+  -e "ssh -i ${BACKUP_PULL_SSH_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes")
+(( dry_run )) && rsync_opts+=(--dry-run)
+
+log "pulling ${BACKUP_PULL_REMOTE}:${BACKUP_PULL_REMOTE_ROOT}"
+rsync "${rsync_opts[@]}" \
+  "${BACKUP_PULL_REMOTE}:${BACKUP_PULL_REMOTE_ROOT%/}/" \
+  "${BACKUP_PULL_LOCAL_ROOT%/}/"
+(( dry_run )) && exit 0
+
+while IFS= read -r sums; do
+  (cd "$(dirname "$sums")" && sha256sum -c --quiet SHA256SUMS)
+done < <(find "$BACKUP_PULL_LOCAL_ROOT" -mindepth 2 -maxdepth 2 -name SHA256SUMS -type f)
+
+snapshot_epoch() {
+  local n="$1"
+  date -u -d "${n:0:4}-${n:4:2}-${n:6:2}T${n:9:2}:${n:11:2}:${n:13:2}Z" +%s 2>/dev/null
+}
+
+now_epoch="$(date -u +%s)"
+index=0
+pruned=0
+declare -A seen_day=() seen_week=()
+mapfile -t snapshots < <(find "$BACKUP_PULL_LOCAL_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -r)
+for name in "${snapshots[@]}"; do
+  if (( index < keep_recent )); then index=$((index + 1)); continue; fi
+  snap_epoch="$(snapshot_epoch "$name")" || { log "skipping unparseable snapshot: $name"; continue; }
+  age_days=$(( (now_epoch - snap_epoch) / 86400 ))
+  if (( age_days <= keep_daily_days )); then
+    key="${name:0:8}"
+    [[ -z "${seen_day[$key]+x}" ]] && { seen_day[$key]=1; continue; }
+  elif (( age_days <= keep_weekly_days )); then
+    key="$(date -u -d "@$snap_epoch" +%G-W%V)"
+    [[ -z "${seen_week[$key]+x}" ]] && { seen_week[$key]=1; continue; }
+  fi
+  rm -rf "${BACKUP_PULL_LOCAL_ROOT:?}/$name"
+  pruned=$((pruned + 1))
+done
+log "retention: ${#snapshots[@]} examined, ${pruned} pruned"

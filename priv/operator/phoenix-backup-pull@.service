@@ -1,0 +1,11 @@
+[Unit]
+Description=Pull Phoenix backup snapshots for %i
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/phoenix-backup-pull/%i.env
+ExecStart=%h/.local/bin/phoenix-backup-pull %h/.config/phoenix-backup-pull/%i.env
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=3h

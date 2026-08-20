@@ -52,6 +52,16 @@ defmodule CiCdHarness.AnsibleRolesTest do
     assert deploy =~ "Pruning old releases after cutover"
   end
 
+  test "ships generic pull-based off-host backup units" do
+    operator_root = Path.join(:code.priv_dir(:ci_cd_harness), "operator")
+
+    assert File.read!(Path.join(operator_root, "phoenix-backup-pull")) =~
+             "BACKUP_PULL_REMOTE"
+
+    assert File.read!(Path.join(operator_root, "phoenix-backup-pull@.timer")) =~
+             "Persistent=true"
+  end
+
   test "web role keeps production indexable and marks non-production responses" do
     defaults = File.read!(Path.join(@roles_root, "web/defaults/main.yml"))
     template = File.read!(Path.join(@roles_root, "web/templates/app.nginx.j2"))
