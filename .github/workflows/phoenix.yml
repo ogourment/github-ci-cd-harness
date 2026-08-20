@@ -1,0 +1,127 @@
+name: Reusable Phoenix CI
+
+on:
+  workflow_call:
+    inputs:
+      elixir-version:
+        description: Elixir version
+        type: string
+        default: "1.20.2"
+      otp-version:
+        description: Erlang/OTP version
+        type: string
+        default: "29.0.3"
+      run-acceptance:
+        description: Run the consumer's mix test.atdd alias and retain evidence
+        type: boolean
+        default: false
+      build-release:
+        description: Build and retain a production OTP release
+        type: boolean
+        default: false
+      release-artifact-name:
+        description: GitHub Actions artifact name for the OTP release
+        type: string
+        default: phoenix-release
+      release-id-prefix:
+        description: Prefix used for immutable deployment release identifiers
+        type: string
+        default: phoenix
+      test-command:
+        description: Consumer test/quality command
+        type: string
+        default: mix test
+    secrets:
+      acceptance-harness-token:
+        description: Optional Framagit token for the private acceptance_harness dependency
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.4-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MIX_ENV: test
+      ACCEPTANCE_HARNESS_TOKEN: ${{ secrets.acceptance-harness-token }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: erlef/setup-beam@v1.24.1
+        with:
+          elixir-version: ${{ inputs.elixir-version }}
+          otp-version: ${{ inputs.otp-version }}
+      - name: Install Hex and Rebar
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+      - name: Fetch dependencies
+        run: mix deps.get
+      - name: Check formatting
+        run: mix format --check-formatted
+      - name: Compile without warnings
+        run: mix compile --warnings-as-errors
+      - name: Run tests
+        run: ${{ inputs.test-command }}
+      - name: Install Playwright Chromium
+        if: ${{ inputs.run-acceptance }}
+        run: |
+          npm --prefix assets install --no-save playwright
+          npx --prefix assets playwright install --with-deps chromium chromium-headless-shell
+      - name: Run browser acceptance tests
+        if: ${{ inputs.run-acceptance }}
+        env:
+          ATDD: "true"
+        run: mix test.atdd
+      - name: Upload acceptance evidence
+        if: ${{ always() && inputs.run-acceptance }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-evidence
+          path: tmp/atdd
+          if-no-files-found: warn
+      - name: Build production assets
+        env:
+          MIX_ENV: prod
+        run: mix assets.deploy
+      - name: Build production release
+        if: ${{ inputs.build-release }}
+        env:
+          MIX_ENV: prod
+        run: mix release --overwrite
+      - name: Record release identity
+        if: ${{ inputs.build-release }}
+        env:
+          RELEASE_ID_PREFIX: ${{ inputs.release-id-prefix }}
+        run: |
+          version="$(mix run --no-start -e 'IO.write(Mix.Project.config()[:version])')"
+          mkdir -p _build
+          printf '%s\n' "$version" > _build/VERSION
+          printf '%s-%s-%s\n' "$RELEASE_ID_PREFIX" "$version" "$GITHUB_RUN_ID" > _build/RELEASE_ID
+      - name: Archive production release with Unix permissions
+        if: ${{ inputs.build-release }}
+        run: tar -C _build/prod/rel -czf _build/release.tar.gz .
+      - name: Upload production release
+        if: ${{ inputs.build-release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.release-artifact-name }}
+          path: |
+            _build/RELEASE_ID
+            _build/VERSION
+            _build/release.tar.gz
+          if-no-files-found: error

@@ -1,0 +1,43 @@
+name: Harness tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.4-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: erlef/setup-beam@v1.24.1
+        with:
+          elixir-version: "1.20.2"
+          otp-version: "29.0.3"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Install contract dependencies
+        run: pip install ansible-core==2.21.2
+      - name: Run Elixir contracts
+        run: mix test
+      - name: Run GitHub workflow contracts
+        run: test/github_phoenix_delivery_contract_test.sh
+      - name: Run backup and restore integration
+        run: test/phoenix_backup_restore_integration_test.sh

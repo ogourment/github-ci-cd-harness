@@ -1,0 +1,48 @@
+name: Reusable Ansible validation
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        type: string
+        default: "."
+      playbook:
+        type: string
+        default: "playbooks/site.yml"
+      inventory:
+        type: string
+        default: "inventory/staging.example"
+      requirements:
+        type: string
+        default: "collections/requirements.yml"
+      submodules:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: ${{ inputs.submodules }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Install current stable Ansible tooling
+        run: pip install ansible-core==2.21.2 ansible-lint==26.6.0
+      - name: Install declared collections
+        run: |
+          if test -f "${{ inputs.requirements }}"; then
+            ansible-galaxy collection install -r "${{ inputs.requirements }}"
+          fi
+      - name: Lint
+        run: ansible-lint "${{ inputs.playbook }}"
+      - name: Syntax check
+        run: ansible-playbook -i "${{ inputs.inventory }}" "${{ inputs.playbook }}" --syntax-check

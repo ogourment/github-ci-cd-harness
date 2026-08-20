@@ -142,3 +142,11 @@ after budgeting the entire physical host, including every co-located app,
 legacy release tree, logs, caches, and enough working space to create the next
 snapshot or unpack the next release. See
 [`docs/retention.md`](docs/retention.md).
+
+## GitHub mirror
+
+Forgejo `olivierg/ci-cd-harness` is the canonical repository. GitHub
+`ogourment/github-ci-cd-harness` is a push mirror so GitHub consumers can call
+the reusable workflows under `.github/workflows`. Develop and release only
+from the canonical repository; mirror commits and tags must resolve to the
+same objects.
