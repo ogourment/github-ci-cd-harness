@@ -38,7 +38,7 @@ metadata_value() {
 
 verify_snapshot() {
   local snapshot="$1"
-  local format_version uploads_included
+  local format_version uploads_included excluded_table_data
   test -d "$snapshot" || { printf 'snapshot not found: %s\n' "$snapshot" >&2; return 1; }
   (
     cd "$snapshot"
@@ -52,6 +52,14 @@ verify_snapshot() {
     printf 'unsupported backup format: %s\n' "${format_version:-legacy}" >&2
     return 1
   }
+
+  # A snapshot may deliberately omit the contents of large regenerable tables.
+  # Announce it: an operator who restores one and finds the table empty must be
+  # able to tell policy from data loss.
+  excluded_table_data="$(metadata_value "$snapshot" BACKUP_EXCLUDED_TABLE_DATA)"
+  if [[ -n "$excluded_table_data" ]]; then
+    printf 'snapshot omits table data by configuration: %s\n' "$excluded_table_data" >&2
+  fi
 
   if [[ "$uploads_included" == true ]]; then
     test -f "${snapshot}/uploads.tar.gz" || {

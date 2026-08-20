@@ -19,6 +19,11 @@ KEEP_WEEKLY_DAYS={{ backup_keep_weekly_days | int }}
 UPLOADS_ENV_VAR="{{ backup_uploads_env_var | default(phoenix_uploads_env_var | default('')) }}"
 UPLOADS_REQUIRED="{{ backup_uploads_required | default((backup_uploads_env_var | default(phoenix_uploads_env_var | default('')) | length) > 0) | bool | lower }}"
 
+# Tables whose CONTENTS are omitted from the dump. Schema is still dumped, so a
+# restore recreates the table empty. Intended for large regenerable data (ATDD
+# evidence on a staging host) whose recovery value does not justify its size.
+EXCLUDE_TABLE_DATA=({% for table in backup_exclude_table_data | default([]) %}{{ table | quote }} {% endfor %})
+
 log() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
 }
@@ -152,13 +157,19 @@ mkdir -p "$tmp_dir"
 prune_snapshots
 
 log "dumping database..."
-"$PG_DUMP_BIN" \
-  --format=custom \
-  --compress=9 \
-  --no-owner \
-  --no-privileges \
-  --file "${tmp_dir}/database.dump" \
-  "$PG_DUMP_URL"
+pg_dump_args=(
+  --format=custom
+  --compress=9
+  --no-owner
+  --no-privileges
+  --file "${tmp_dir}/database.dump"
+)
+for excluded_table in ${EXCLUDE_TABLE_DATA[@]+"${EXCLUDE_TABLE_DATA[@]}"}; do
+  log "excluding table data: ${excluded_table}"
+  pg_dump_args+=(--exclude-table-data="$excluded_table")
+done
+
+"$PG_DUMP_BIN" "${pg_dump_args[@]}" "$PG_DUMP_URL"
 
 # Optional uploads backup: resolve the configured env var indirectly.
 uploads_dir=""
@@ -177,6 +188,11 @@ else
   uploads_included=false
 fi
 
+excluded_table_data_list="$(
+  IFS=,
+  printf '%s' "${EXCLUDE_TABLE_DATA[*]+${EXCLUDE_TABLE_DATA[*]}}"
+)"
+
 cat > "${tmp_dir}/metadata.env" <<EOF
 BACKUP_FORMAT_VERSION=2
 BACKUP_APP_NAME=${APP_NAME}
@@ -185,6 +201,7 @@ BACKUP_TIMESTAMP=${timestamp}
 BACKUP_RELEASE=${current_release}
 BACKUP_UPLOADS_INCLUDED=${uploads_included}
 BACKUP_UPLOADS_ENV_VAR=${UPLOADS_ENV_VAR}
+BACKUP_EXCLUDED_TABLE_DATA=${excluded_table_data_list}
 EOF
 
 (

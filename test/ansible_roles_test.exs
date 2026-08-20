@@ -24,6 +24,21 @@ defmodule CiCdHarness.AnsibleRolesTest do
     assert File.read!(restore) =~ "RESTORE_DATABASE_URL"
   end
 
+  test "backup role can omit regenerable table data and says so in the snapshot" do
+    backup = Path.join(@roles_root, "phoenix_backup/templates/backup.sh.j2")
+    restore = Path.join(@roles_root, "phoenix_backup/templates/restore.sh.j2")
+
+    backup_source = File.read!(backup)
+
+    assert backup_source =~ "backup_exclude_table_data | default([])"
+    assert backup_source =~ "--exclude-table-data="
+    assert backup_source =~ "BACKUP_EXCLUDED_TABLE_DATA="
+
+    # Restoring a snapshot with an empty table must be distinguishable from
+    # restoring one that lost the data.
+    assert File.read!(restore) =~ "BACKUP_EXCLUDED_TABLE_DATA"
+  end
+
   test "web role keeps production indexable and marks non-production responses" do
     defaults = File.read!(Path.join(@roles_root, "web/defaults/main.yml"))
     template = File.read!(Path.join(@roles_root, "web/templates/app.nginx.j2"))

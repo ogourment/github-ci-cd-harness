@@ -11,6 +11,10 @@
 # Persistent uploads automatically follow phoenix_uploads_env_var when the
 # runtime role defines it. backup_uploads_env_var can override that shared
 # variable. backup_uploads_required defaults true whenever either is set.
+# backup_exclude_table_data lists tables whose contents are left out of the dump
+# (schema is still dumped, so a restore recreates them empty). Use it for large
+# regenerable data whose recovery value does not justify its backup size; the
+# snapshot records the list in BACKUP_EXCLUDED_TABLE_DATA.
 - name: Ensure backup directories exist
   ansible.builtin.file:
     path: "{{ item }}"

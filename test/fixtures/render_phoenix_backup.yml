@@ -13,6 +13,7 @@
     backup_keep_recent: 3
     backup_keep_daily_days: 7
     backup_keep_weekly_days: 28
+    backup_exclude_table_data: "{{ lookup('ansible.builtin.env', 'BACKUP_CONTRACT_EXCLUDE_TABLE_DATA') | split(',') | select() | list }}"
     phoenix_uploads_dir: "{{ lookup('ansible.builtin.env', 'BACKUP_CONTRACT_UPLOADS_ROOT') }}"
     phoenix_uploads_env_var: BACKUP_CONTRACT_UPLOADS_DIR
   tasks:

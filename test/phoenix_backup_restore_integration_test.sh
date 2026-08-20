@@ -55,6 +55,13 @@ CREATE TABLE backup_contract_items (
 );
 INSERT INTO backup_contract_items (label)
 VALUES ('restored café'), ('restored workshop');
+
+CREATE TABLE backup_contract_evidence (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  payload text NOT NULL
+);
+INSERT INTO backup_contract_evidence (payload)
+VALUES ('regenerable evidence'), ('more regenerable evidence');
 SQL
 
 app_root="${work_dir}/app"
@@ -79,6 +86,7 @@ export BACKUP_CONTRACT_COLOR_FILE="$color_file"
 export BACKUP_CONTRACT_ROOT="$backup_root"
 export BACKUP_CONTRACT_PG_DUMP="$(command -v pg_dump)"
 export BACKUP_CONTRACT_UPLOADS_ROOT="$uploads_root"
+export BACKUP_CONTRACT_EXCLUDE_TABLE_DATA=backup_contract_evidence
 export BACKUP_CONTRACT_TEMPLATE="${root}/priv/ansible/roles/phoenix_backup/templates/backup.sh.j2"
 export BACKUP_CONTRACT_SCRIPT="$rendered_script"
 export BACKUP_CONTRACT_RESTORE_TEMPLATE="${root}/priv/ansible/roles/phoenix_backup/templates/restore.sh.j2"
@@ -88,7 +96,8 @@ ansible-playbook \
   -i localhost, \
   "${root}/test/fixtures/render_phoenix_backup.yml" >/dev/null
 
-"$rendered_script"
+"$rendered_script" | tee "${work_dir}/backup.log"
+grep -Fq 'excluding table data: backup_contract_evidence' "${work_dir}/backup.log"
 
 snapshot="$(readlink -f "${backup_root}/latest")"
 test -n "$snapshot"
@@ -115,6 +124,15 @@ restored_rows="$(
     "SELECT count(*) || ':' || string_agg(label, ',' ORDER BY id) FROM backup_contract_items"
 )"
 test "$restored_rows" = '2:restored café,restored workshop'
+
+# Excluded table data must restore as an existing but empty table: the schema
+# has to survive so the application still starts against the restored database.
+restored_evidence="$(
+  psql "$restore_url" -Atqc \
+    "SELECT to_regclass('public.backup_contract_evidence') IS NOT NULL
+            || ':' || (SELECT count(*) FROM backup_contract_evidence)"
+)"
+test "$restored_evidence" = 'true:0'
 test "$(cat "${restored_uploads_root}/evidence.txt")" = 'contract upload'
 if "$rendered_restore_script" uploads "$snapshot" "$restored_uploads_root" >/dev/null 2>&1; then
   printf 'restore helper overwrote a non-empty persistent-files target\n' >&2
@@ -125,6 +143,13 @@ grep -Fq 'BACKUP_FORMAT_VERSION=2' "${snapshot}/metadata.env"
 grep -Fq 'BACKUP_APP_NAME=backup_contract' "${snapshot}/metadata.env"
 grep -Fq 'BACKUP_RELEASE=' "${snapshot}/metadata.env"
 grep -Fq 'BACKUP_UPLOADS_INCLUDED=true' "${snapshot}/metadata.env"
+grep -Fq 'BACKUP_EXCLUDED_TABLE_DATA=backup_contract_evidence' "${snapshot}/metadata.env"
+
+# The restore helper must announce the omission rather than let an operator read
+# the empty table as data loss.
+"$rendered_restore_script" verify "$snapshot" 2>"${work_dir}/verify.log" >/dev/null
+grep -Fq 'snapshot omits table data by configuration: backup_contract_evidence' \
+  "${work_dir}/verify.log"
 
 rm -rf "$uploads_root"
 if "$rendered_script" >"${work_dir}/missing-uploads.log" 2>&1; then
