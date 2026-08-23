@@ -108,7 +108,7 @@ job_timestamp() {
   esac
 
   if [ -n "${CI_JOB_ID:-}" ]; then
-    gitlab_api_json "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/jobs/${CI_JOB_ID}" | json_field "$field"
+    gitlab_api_json "${CI_API_V4_URL:-}/projects/${CI_PROJECT_ID:-}/jobs/${CI_JOB_ID}" | json_field "$field"
   fi
 }
 
@@ -119,7 +119,7 @@ pipeline_timestamp() {
   fi
 
   if [ -n "${CI_PIPELINE_ID:-}" ]; then
-    gitlab_api_json "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/pipelines/${CI_PIPELINE_ID}" |
+    gitlab_api_json "${CI_API_V4_URL:-}/projects/${CI_PROJECT_ID:-}/pipelines/${CI_PIPELINE_ID}" |
       json_field created_at
   fi
 }

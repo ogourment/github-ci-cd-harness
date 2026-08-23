@@ -56,6 +56,13 @@ defmodule CiCdHarness.CoreScriptsTest do
     assert body =~ ~s|"$(dirname "${BASH_SOURCE[0]}")/verify_health_identity.sh"|
   end
 
+  test "deployment timing metadata is optional outside GitLab" do
+    body = File.read!(Path.join(@core, "deploy_release_fast.sh"))
+
+    refute body =~ ~s|gitlab_api_json "${CI_API_V4_URL}/|
+    assert body =~ ~s|gitlab_api_json "${CI_API_V4_URL:-}/|
+  end
+
   test "every shell script parses" do
     for script <- @shell_scripts do
       {output, status} =
