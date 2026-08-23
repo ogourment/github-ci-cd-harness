@@ -22,6 +22,7 @@ defmodule CiCdHarness.CoreScriptsTest do
     exunit_test_value_report.exs
     notify_deployment.sh
     notify_message.sh
+    pipeline_acceptance_report.sh
     release_tag.sh
     staging_release_smoke.sh
     verify_health_identity.sh
