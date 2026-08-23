@@ -43,7 +43,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.28", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.29", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -80,6 +80,13 @@ relative to themselves, and a test enforces that.
 Consuming them through this package also removes a network fetch from every
 job. Cloning them per job made CI depend on a forge that rate-limits SSH, which
 failed builds intermittently.
+
+The executable `scripts/resource_preflight.sh` guards intensive local commands
+against active Linux memory pressure. The executable
+`scripts/phoenix_test_database_preflight.sh` requires linked worktrees to use a
+stable `MIX_TEST_PARTITION` and verifies that partition's test database before
+the test command starts. They remain at these public paths so application Mix
+aliases can share the checks without copying them.
 
 ## Ansible roles
 
@@ -118,10 +125,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.28/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.28/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.28/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.28/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.29/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.29/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.29/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.29/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable
