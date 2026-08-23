@@ -5,15 +5,15 @@ git dependency.
 
 ## Why this exists
 
-`gitlab-ci-cd-harness` is shared through GitLab's `include: project:file:ref`,
-which Forgejo has no equivalent for. Rather than copy its scripts into each
+The predecessor was shared through GitLab's `include: project:file:ref`, which
+Forgejo has no equivalent for. Rather than copy its scripts into each
 application — leaving several divergent implementations of the same delivery
 logic — the shared behaviour moves here and is versioned through `mix.lock`,
-with the same immutability a pinned tag gave the GitLab harness.
+with the same immutability as the predecessor's pinned tag.
 
-The name carries no forge, deliberately. `gitlab-ci-cd-harness` was the wrong
-name the moment a second forge appeared, and `forgejo-ci-cd-harness` would
-repeat the mistake.
+The canonical name carries no forge, deliberately. A provider-specific name
+became misleading the moment a second forge appeared; renaming it after each
+provider migration would repeat the mistake.
 
 ## Design
 
@@ -43,7 +43,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.27", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.28", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -118,10 +118,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.27/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.27/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.27/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.27/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.28/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.28/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.28/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.28/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable

@@ -40,10 +40,12 @@ defmodule CiCdHarness.CoreScriptsTest do
   end
 
   test "no script depends on being cloned into a particular directory name" do
+    predecessor_directory = "." <> Enum.join(["gitlab", "ci", "cd", "harness"], "-") <> "/"
+
     for script <- @scripts do
       body = File.read!(Path.join(@core, script))
 
-      refute body =~ ".gitlab-ci-cd-harness/",
+      refute body =~ predecessor_directory,
              "#{script} still resolves a sibling through a fixed clone directory"
     end
   end

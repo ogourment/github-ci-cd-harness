@@ -19,6 +19,15 @@ defmodule CiCdHarnessTest do
     :ok
   end
 
+  test "the source tree uses only the canonical package name" do
+    legacy_name = Enum.join(["gitlab", "ci", "cd", "harness"], "-")
+
+    {matches, status} = System.cmd("git", ["grep", "-n", legacy_name])
+
+    assert status == 1, matches
+    assert matches == ""
+  end
+
   defp forgejo_env do
     System.put_env(%{
       "GITHUB_RUN_ID" => "4242",
