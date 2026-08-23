@@ -89,6 +89,22 @@ the same provider-neutral implementation. The package includes `common`,
 `phoenix_postgres`, `phoenix_blue_green`, `web`, `phoenix_backup`, and
 `system_toolbox_identity`.
 
+### Deployment lifecycle hook
+
+The `phoenix_blue_green` role can call an optional consumer-owned executable
+configured with `deploy_lifecycle_hook`. It sends `begin-deployment` before
+shared migrations, then `deployment-complete` after verified cutover or
+`deployment-aborted` when the deploy fails. A failed begin hook aborts before
+migration; terminal hooks are best-effort because cutover may already have
+occurred.
+
+The hook receives the event as its first argument and the same value in
+`CI_CD_DEPLOYMENT_EVENT`. Deployment ID, release ID, pipeline ID, environment,
+current and target colors, and an expiry epoch are available through
+`CI_CD_DEPLOYMENT_*` variables. Consumers must make quiescence expire no later
+than `CI_CD_DEPLOYMENT_EXPIRES_AT_EPOCH`; terminal events may clear it earlier.
+The contract does not require a shared filesystem marker.
+
 ## Environment badging
 
 Non-production deployments should say so. See

@@ -42,6 +42,12 @@ STANDBY_SEC={{ deploy_standby_sec }}
 STANDBY_END_SCRIPT="{{ deploy_standby_end_script }}"
 STANDBY_UNIT="{{ app_name }}-standby-end"
 OPERATION_LOCK_PATH="{{ deploy_operation_lock_path }}"
+LIFECYCLE_HOOK="{{ deploy_lifecycle_hook }}"
+LIFECYCLE_DISPATCH="{{ deploy_lifecycle_dispatch_script }}"
+LIFECYCLE_TIMEOUT_SEC={{ deploy_lifecycle_timeout_sec | int }}
+LIFECYCLE_WINDOW_SEC={{ deploy_lifecycle_window_sec | int }}
+LIFECYCLE_BEGUN=false
+LIFECYCLE_TERMINATED=false
 
 UPSTREAM_MAX_FAILS={{ nginx_upstream_max_fails }}
 UPSTREAM_FAIL_TIMEOUT="{{ nginx_upstream_fail_timeout }}"
@@ -172,11 +178,34 @@ deploy_success_message() {
 
 on_deploy_error() {
   local status="$?"
+  trap - ERR
+  if [[ "${LIFECYCLE_BEGUN}" == "true" && "${LIFECYCLE_TERMINATED}" != "true" ]]; then
+    dispatch_deployment_lifecycle deployment-aborted ||
+      echo "WARNING: deployment-aborted lifecycle hook failed" >&2
+    LIFECYCLE_TERMINATED=true
+  fi
   # Deployment failures always notify, even when CI owns success notices.
   notify "$(deploy_failure_message "${status}")" false
   exit "${status}"
 }
 trap on_deploy_error ERR
+
+dispatch_deployment_lifecycle() {
+  local event="$1"
+
+  [[ -n "${LIFECYCLE_HOOK}" ]] || return 0
+  sudo -u "${DEPLOY_USER}" "${LIFECYCLE_DISPATCH}" \
+    "${LIFECYCLE_HOOK}" \
+    "${LIFECYCLE_TIMEOUT_SEC}" \
+    "${event}" \
+    "${DEPLOY_ENV}:${RELEASE_ID}" \
+    "${RELEASE_ID}" \
+    "${CI_PIPELINE_ID}" \
+    "${DEPLOY_ENV}" \
+    "${CURRENT_COLOR}" \
+    "${TARGET_COLOR}" \
+    "${LIFECYCLE_EXPIRES_AT_EPOCH}"
+}
 
 cancel_standby_timer() {
   systemctl stop "${STANDBY_UNIT}.timer" "${STANDBY_UNIT}.service" 2>/dev/null || true
@@ -492,6 +521,13 @@ chown "{{ deploy_user }}:{{ deploy_user }}" "${tmp_env}"
 chmod 600 "${tmp_env}"
 mv "${tmp_env}" "${TARGET_METADATA_ENV_FILE}"
 
+if [[ -n "${LIFECYCLE_HOOK}" ]]; then
+  LIFECYCLE_EXPIRES_AT_EPOCH=$(( $(date -u +%s) + LIFECYCLE_WINDOW_SEC ))
+  echo "==> Preparing ${CURRENT_COLOR} for deployment..."
+  dispatch_deployment_lifecycle begin-deployment
+  LIFECYCLE_BEGUN=true
+fi
+
 if [[ "${RUN_MIGRATIONS}" == "migrate" ]]; then
   echo "==> Running migrations (must be backward-compatible with ${CURRENT_COLOR})..."
   sudo -u "${DEPLOY_USER}" bash -lc "
@@ -561,6 +597,13 @@ fi
 
 echo "${TARGET_COLOR}" > "${CURRENT_COLOR_FILE}"
 chown "${DEPLOY_USER}:${DEPLOY_USER}" "${CURRENT_COLOR_FILE}"
+
+if [[ "${LIFECYCLE_BEGUN}" == "true" ]]; then
+  if ! dispatch_deployment_lifecycle deployment-complete; then
+    echo "WARNING: deployment-complete lifecycle hook failed; consumer expiry remains the safety net" >&2
+  fi
+  LIFECYCLE_TERMINATED=true
+fi
 
 {% if phoenix_deploy_record %}
 echo "==> Recording deployment timeline entry..."

@@ -23,6 +23,9 @@
       - app_health_watch_interval_sec | int >= 0
       - app_health_watch_failure_threshold | int > 0
       - app_health_watch_action_cooldown_sec | int > 0
+      - deploy_lifecycle_timeout_sec | int > 0
+      - deploy_lifecycle_window_sec | int > 0
+      - deploy_lifecycle_hook | length == 0 or deploy_lifecycle_hook is match('^/')
     quiet: true
 
 - name: Ensure app root exists
@@ -53,6 +56,22 @@
   ansible.builtin.template:
     src: phoenix_deploy.sh.j2
     dest: "{{ deploy_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure CI/CD harness helper directory exists
+  ansible.builtin.file:
+    path: "{{ deploy_lifecycle_dispatch_script | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install deployment lifecycle dispatcher
+  ansible.builtin.copy:
+    src: deployment_lifecycle.sh
+    dest: "{{ deploy_lifecycle_dispatch_script }}"
     owner: root
     group: root
     mode: "0755"

@@ -41,7 +41,9 @@ defmodule CiCdHarness.AnsibleRolesTest do
 
   test "release retention is configurable and runs before and after staging" do
     defaults = File.read!(Path.join(@roles_root, "phoenix_blue_green/defaults/main.yml"))
-    deploy = File.read!(Path.join(@roles_root, "phoenix_blue_green/templates/phoenix_deploy.sh.j2"))
+
+    deploy =
+      File.read!(Path.join(@roles_root, "phoenix_blue_green/templates/phoenix_deploy.sh.j2"))
 
     assert defaults =~ "deploy_keep_recent: 5"
     assert defaults =~ "deploy_keep_daily_days: 7"
@@ -50,6 +52,31 @@ defmodule CiCdHarness.AnsibleRolesTest do
     assert deploy =~ ~s(local keep_recent="${RELEASE_KEEP_RECENT}")
     assert deploy =~ "Pruning old releases before staging"
     assert deploy =~ "Pruning old releases after cutover"
+  end
+
+  test "blue-green deploy sends a bounded consumer lifecycle around migrations and cutover" do
+    defaults = File.read!(Path.join(@roles_root, "phoenix_blue_green/defaults/main.yml"))
+    tasks = File.read!(Path.join(@roles_root, "phoenix_blue_green/tasks/main.yml"))
+
+    deploy =
+      File.read!(Path.join(@roles_root, "phoenix_blue_green/templates/phoenix_deploy.sh.j2"))
+
+    assert defaults =~ ~s(deploy_lifecycle_hook: "")
+    assert defaults =~ "deploy_lifecycle_window_sec: 600"
+    assert tasks =~ "Install deployment lifecycle dispatcher"
+
+    begin_offset = byte_offset!(deploy, "dispatch_deployment_lifecycle begin-deployment")
+    migration_offset = byte_offset!(deploy, ~s(if [[ "${RUN_MIGRATIONS}" == "migrate" ]]))
+
+    verified_cutover_offset =
+      byte_offset!(deploy, ~s(echo "${TARGET_COLOR}" > "${CURRENT_COLOR_FILE}"))
+
+    complete_offset = byte_offset!(deploy, "dispatch_deployment_lifecycle deployment-complete")
+
+    assert begin_offset < migration_offset
+    assert verified_cutover_offset < complete_offset
+    assert deploy =~ "dispatch_deployment_lifecycle deployment-aborted"
+    refute deploy =~ "deployment-active"
   end
 
   test "ships generic pull-based off-host backup units" do
@@ -73,5 +100,10 @@ defmodule CiCdHarness.AnsibleRolesTest do
 
     assert length(Regex.scan(~r/add_header X-Robots-Tag "noindex, nofollow" always;/, template)) ==
              2
+  end
+
+  defp byte_offset!(text, pattern) do
+    {offset, _length} = :binary.match(text, pattern)
+    offset
   end
 end
