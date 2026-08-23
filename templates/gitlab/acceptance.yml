@@ -1,6 +1,6 @@
 variables:
   CI_CD_HARNESS_URL: "https://git.agile-u.com/olivierg/ci-cd-harness.git"
-  CI_CD_HARNESS_REF: "v0.4.15"
+  CI_CD_HARNESS_REF: "v0.4.26"
   # Publishing a report to GitLab Pages creates a Pages deployment. Keep that
   # separate from acceptance verification, so consumers opt in deliberately.
   CI_CD_ENABLE_ACCEPTANCE_REPORT_PAGES: "false"

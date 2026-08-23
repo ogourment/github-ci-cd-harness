@@ -11,6 +11,7 @@ defmodule CiCdHarness.CoreScriptsTest do
 
   @scripts ~w(
     acceptance_evidence.sh
+    atdd_generate_thumbnails.sh
     atdd_remote_copy.sh
     ci_cd_alert_event.sh
     atdd_remote_eval.sh

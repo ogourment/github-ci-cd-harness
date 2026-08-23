@@ -1,0 +1,17 @@
+.ci_cd_host_permit:
+  variables:
+    CI_PERMIT_PROVIDER: "gitlab"
+    CI_PERMIT_REQUEST_ID: "gitlab:${CI_PROJECT_ID}:${CI_PIPELINE_ID}:${CI_JOB_ID}"
+  image:
+    name: "$CI_CD_PERMIT_IMAGE"
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - >-
+        if [ -x /usr/local/bin/ci-with-permit ] &&
+        [ -S /run/ci-permits/ci-permits.sock ]; then
+          exec /usr/local/bin/ci-with-permit "$@";
+        else
+          exec "$@";
+        fi
+      - "--"

@@ -3,6 +3,7 @@ defmodule CiCdHarness.GitLabAcceptanceQualityTemplateTest do
 
   @templates [
     Path.expand("../templates/gitlab/acceptance.yml", __DIR__),
+    Path.expand("../templates/gitlab/cd.yml", __DIR__),
     Path.expand("../templates/gitlab/quality.yml", __DIR__)
   ]
 
@@ -10,12 +11,21 @@ defmodule CiCdHarness.GitLabAcceptanceQualityTemplateTest do
     for path <- @templates do
       template = File.read!(path)
 
-      assert template =~ ~s(CI_CD_HARNESS_REF: "v0.4.15")
+      assert template =~ ~s(CI_CD_HARNESS_REF: "v0.4.26")
       assert template =~ "https://git.agile-u.com/olivierg/ci-cd-harness.git"
       assert template =~ ".ci-cd-harness/priv/core/"
       refute template =~ "gitlab-ci-cd-harness"
       refute template =~ ".ci-cd-harness/scripts/"
     end
+  end
+
+  test "the GitLab permit adapter preserves shared-runner admission" do
+    template = File.read!(Path.expand("../templates/gitlab/permit.yml", __DIR__))
+
+    assert template =~ ".ci_cd_host_permit:"
+    assert template =~ ~s(CI_PERMIT_PROVIDER: "gitlab")
+    assert template =~ "ci-with-permit"
+    assert template =~ "/run/ci-permits/ci-permits.sock"
   end
 
   test "the acceptance adapter preserves the evidence and gate job graph" do
