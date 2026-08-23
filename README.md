@@ -33,6 +33,8 @@ priv/forges/forgejo/          adapter scripts, where shell is the right tool
 evidence site, evaluates the gate and writes the notification message. It is the
 GitLab template's logic verbatim, with one input made explicit:
 `ACCEPTANCE_REPORT_URL`, because each forge addresses run artifacts differently.
+The GitLab adapter derives an immutable job-artifact URL when a consumer does
+not provide an explicit live evidence URL.
 Evidence is produced even when scenarios fail — the gate is a separate step.
 
 `CiCdHarness.normalized_env/0` maps Forgejo's GitHub-compatible variables onto
@@ -43,7 +45,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.30", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.31", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -128,10 +130,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.30/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.30/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.30/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.30/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.31/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.31/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.31/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.31/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable

@@ -13,7 +13,7 @@ defmodule CiCdHarness.GitLabAcceptanceQualityTemplateTest do
     for path <- @templates do
       template = File.read!(path)
 
-      assert template =~ ~s(CI_CD_HARNESS_REF: "v0.4.30")
+      assert template =~ ~s(CI_CD_HARNESS_REF: "v0.4.31")
       assert template =~ "https://git.agile-u.com/olivierg/ci-cd-harness.git"
       assert template =~ ".ci-cd-harness/priv/core/"
       refute template =~ predecessor_name
@@ -37,6 +37,10 @@ defmodule CiCdHarness.GitLabAcceptanceQualityTemplateTest do
     assert template =~ "ACCEPTANCE_FAST_COMMAND"
     assert template =~ "pipeline_acceptance_report.sh staging"
     assert template =~ "acceptance_evidence:"
+
+    assert template =~
+             ~S(export ACCEPTANCE_REPORT_URL="${ACCEPTANCE_REPORT_URL:-${CI_JOB_URL}/artifacts/file/${ACCEPTANCE_PUBLIC_DIR%/}/index.html}")
+
     assert template =~ "job: deploy_staging"
     assert template =~ "job: acceptance_fast"
     assert template =~ "acceptance_gate:"
