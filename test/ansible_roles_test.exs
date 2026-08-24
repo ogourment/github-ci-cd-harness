@@ -79,6 +79,16 @@ defmodule CiCdHarness.AnsibleRolesTest do
     refute deploy =~ "deployment-active"
   end
 
+  test "blue-green deploy waits for the reloaded nginx generation to expose candidate identity" do
+    deploy =
+      File.read!(Path.join(@roles_root, "phoenix_blue_green/templates/phoenix_deploy.sh.j2"))
+
+    assert deploy =~ ~S|identity_deadline="$(( $(date +%s) + PUBLIC_SMOKE_TIMEOUT_SEC ))"|
+    assert deploy =~ ~S|while [[ $(date +%s) -lt ${identity_deadline} ]]; do|
+    assert deploy =~ ~S|sleep "${PUBLIC_IDENTITY_INTERVAL_SEC}"|
+    assert deploy =~ "public candidate identity did not converge"
+  end
+
   test "ships generic pull-based off-host backup units" do
     operator_root = Path.join(:code.priv_dir(:ci_cd_harness), "operator")
 

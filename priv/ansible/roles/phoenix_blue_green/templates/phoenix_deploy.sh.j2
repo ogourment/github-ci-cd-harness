@@ -57,6 +57,7 @@ PUBLIC_IDENTITY_PATH="{{ deploy_public_identity_path }}"
 PUBLIC_SMOKE_PATH="{{ deploy_public_smoke_path }}"
 PUBLIC_SMOKE_CONTENT_TYPE="{{ deploy_public_smoke_content_type }}"
 PUBLIC_SMOKE_TIMEOUT_SEC={{ deploy_public_smoke_timeout_sec }}
+PUBLIC_IDENTITY_INTERVAL_SEC=1
 
 mkdir -p "$(dirname "${OPERATION_LOCK_PATH}")"
 exec 9>"${OPERATION_LOCK_PATH}"
@@ -348,17 +349,25 @@ verify_public_candidate() {
   fi
 
   echo "==> Verifying public candidate identity ${identity_url}..."
-  if ! curl --fail --silent --show-error --location \
-    --connect-timeout "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
-    --max-time "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
-    --output "${identity_body}" \
-    "${identity_url}" ||
-    ! verify_identity_file "${identity_body}"; then
-    rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
-    return 1
-  fi
+  identity_deadline="$(( $(date +%s) + PUBLIC_SMOKE_TIMEOUT_SEC ))"
+  while [[ $(date +%s) -lt ${identity_deadline} ]]; do
+    if curl --fail --silent --show-error --location \
+      --connect-timeout "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
+      --max-time "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
+      --output "${identity_body}" \
+      "${identity_url}" &&
+      verify_identity_file "${identity_body}"; then
+      rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+      return 0
+    fi
 
+    sleep "${PUBLIC_IDENTITY_INTERVAL_SEC}"
+  done
+
+  echo "ERROR: public candidate identity did not converge within ${PUBLIC_SMOKE_TIMEOUT_SEC}s" >&2
   rm -f "${smoke_body}" "${smoke_headers}" "${identity_body}"
+  return 1
+
 }
 
 # --- Release pruning ---------------------------------------------------------
