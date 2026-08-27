@@ -1,6 +1,6 @@
 variables:
   CI_CD_HARNESS_URL: "https://git.agile-u.com/olivierg/ci-cd-harness.git"
-  CI_CD_HARNESS_REF: "v0.4.33"
+  CI_CD_HARNESS_REF: "v0.4.34"
   CI_CD_ENABLE_STAGING_DEPLOY: "true"
   CI_CD_ENABLE_PROD_DEPLOY: "false"
   CI_CD_ENABLE_RELEASE_TAG: "false"
