@@ -5,8 +5,9 @@ defmodule CiCdHarness.GitLabCdTemplateTest do
 
   test "the GitLab adapter pins and executes the provider-neutral package" do
     template = File.read!(@template)
+    harness_ref = "v#{Mix.Project.config()[:version]}"
 
-    assert template =~ ~s(CI_CD_HARNESS_REF: "v0.4.35")
+    assert template =~ ~s(CI_CD_HARNESS_REF: "#{harness_ref}")
     assert template =~ "https://git.agile-u.com/olivierg/ci-cd-harness.git"
     assert template =~ ".ci-cd-harness/priv/core/deploy_release_fast.sh"
     assert template =~ ".ci-cd-harness/priv/core/release_tag.sh"
