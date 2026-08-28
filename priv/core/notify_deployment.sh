@@ -10,8 +10,6 @@
 #
 # Reporting must never turn a successful release into a failed pipeline, so this
 # deliberately disables errexit and always exits 0.
-ci_cd_deploy_commit_limit=10
-
 # A deployment has already succeeded or failed by the time this hook runs.
 # Reporting must never turn a successful release into a failed pipeline.
 set +e
@@ -38,14 +36,44 @@ actor="${GITLAB_USER_LOGIN:-${GITLAB_USER_NAME:-unknown}}"
 pipeline_id="${CI_PIPELINE_ID:-unknown}"
 job_id="${CI_JOB_ID:-unknown}"
 
-if [ -n "${CI_COMMIT_BEFORE_SHA:-}" ] && [ "${CI_COMMIT_BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]; then
-  ci_deploy_commit_messages="$(git log --no-merges --pretty=format:'%h %s' --max-count=25 --since='7 days ago' "${CI_COMMIT_BEFORE_SHA}..${CI_COMMIT_SHA}" 2>/dev/null || true)"
+previous_deployed_sha() {
+  local previous_health_file previous_release_id release_without_pipeline short_sha
+
+  if [ -n "${CI_CD_PREVIOUS_DEPLOYED_SHA:-}" ] &&
+    git cat-file -e "${CI_CD_PREVIOUS_DEPLOYED_SHA}^{commit}" 2>/dev/null; then
+    git rev-parse "${CI_CD_PREVIOUS_DEPLOYED_SHA}^{commit}" 2>/dev/null
+    return
+  fi
+
+  previous_health_file="/tmp/${CI_CD_OTP_APP:-app}_${CI_CD_DEPLOY_TARGET}_previous_health.json"
+  [ -s "$previous_health_file" ] || return
+
+  previous_release_id="$(sed -nE 's/.*"release_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$previous_health_file" | tail -n 1)"
+  release_without_pipeline="${previous_release_id%-*}"
+  short_sha="${release_without_pipeline##*-}"
+
+  if [[ "$short_sha" =~ ^[0-9a-fA-F]{7,40}$ ]] &&
+    git cat-file -e "${short_sha}^{commit}" 2>/dev/null; then
+    git rev-parse "${short_sha}^{commit}" 2>/dev/null
+  fi
+}
+
+commit_boundary="$(previous_deployed_sha || true)"
+if [ -z "$commit_boundary" ] &&
+  [ -n "${CI_COMMIT_BEFORE_SHA:-}" ] &&
+  [ "${CI_COMMIT_BEFORE_SHA}" != "0000000000000000000000000000000000000000" ] &&
+  git cat-file -e "${CI_COMMIT_BEFORE_SHA}^{commit}" 2>/dev/null; then
+  commit_boundary="${CI_COMMIT_BEFORE_SHA}"
+fi
+
+if [ -n "$commit_boundary" ]; then
+  ci_deploy_commit_messages="$(git log --no-merges --pretty=format:'%h %s' "${commit_boundary}..${CI_COMMIT_SHA:-HEAD}" 2>/dev/null || true)"
 else
-  ci_deploy_commit_messages="$(git log --no-merges --pretty=format:'%h %s' --max-count=25 --since='7 days ago' 2>/dev/null || true)"
+  ci_deploy_commit_messages=""
 fi
 
 if [ -z "${ci_deploy_commit_messages:-}" ]; then
-  ci_deploy_commit_messages="$(git log --no-merges --pretty=format:'%h %s' --max-count="${ci_cd_deploy_commit_limit}" -- "${CI_COMMIT_SHA:-HEAD}" 2>/dev/null || true)"
+  ci_deploy_commit_messages="$(git log -1 --no-merges --pretty=format:'%h %s' "${CI_COMMIT_SHA:-HEAD}" 2>/dev/null || true)"
 fi
 
 commit_count="$(printf '%s\n' "${ci_deploy_commit_messages}" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
@@ -134,9 +162,6 @@ if [ "${commit_count}" -gt 0 ]; then
   printed=0
   while IFS= read -r commit_line; do
     [ -z "${commit_line}" ] && continue
-    if [ "$printed" -ge "${ci_cd_deploy_commit_limit}" ]; then
-      continue
-    fi
     commit_hash="${commit_line%% *}"
     commit_subject="${commit_line#* }"
     if [ "$commit_hash" != "$commit_line" ] && [[ "$commit_hash" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
@@ -146,9 +171,6 @@ if [ "${commit_count}" -gt 0 ]; then
     fi
     printed=$((printed + 1))
   done <<< "${ci_deploy_commit_messages}"
-  if [ "${commit_count}" -gt "${ci_cd_deploy_commit_limit}" ]; then
-    message+=$'\n'"... $((commit_count - ci_cd_deploy_commit_limit)) more"
-  fi
 fi
 
 if [ -n "$CI_CD_ALERT_ADAPTER" ]; then

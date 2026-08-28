@@ -17,6 +17,16 @@ target="${1:?target required}"
 
 release_id="$(cat _build/RELEASE_ID)"
 version="$(cat _build/VERSION)"
+previous_health_file="/tmp/${CI_CD_OTP_APP}_${target}_previous_health.json"
+
+# The push boundary is not the deployment boundary: production can be
+# deployed manually after several pushes. Preserve the identity currently
+# serving traffic so the notification can report the complete release range.
+rm -f "$previous_health_file"
+if [ -n "${CI_CD_HEALTH_URL:-}" ]; then
+  curl -fsSL "$CI_CD_HEALTH_URL" >"$previous_health_file" 2>/dev/null ||
+    rm -f "$previous_health_file"
+fi
 
 remote_env_prefix="${CI_CD_REMOTE_ENV_PREFIX:-$(printf '%s' "$CI_CD_OTP_APP" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9_' '_')}"
 

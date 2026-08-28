@@ -63,6 +63,59 @@ defmodule CiCdHarness.CoreScriptsTest do
     assert body =~ ~s|gitlab_api_json "${CI_API_V4_URL:-}/|
   end
 
+  test "deployment notification lists every commit since the previous deployed release" do
+    tmp = Path.join(System.tmp_dir!(), "ci-cd-notify-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(tmp, "_build"))
+
+    git = fn args ->
+      {output, 0} = System.cmd("git", args, cd: tmp, stderr_to_stdout: true)
+      String.trim(output)
+    end
+
+    git.(["init", "-q"])
+    git.(["config", "user.email", "delivery@example.test"])
+    git.(["config", "user.name", "Delivery Test"])
+
+    commits =
+      for subject <- ["Version déployée", "Premier changement", "Deuxième changement", "Troisième changement"] do
+        File.write!(Path.join(tmp, "change.txt"), subject)
+        git.(["add", "change.txt"])
+        git.(["commit", "-q", "-m", subject])
+        git.(["rev-parse", "HEAD"])
+      end
+
+    [deployed_sha, _first_sha, second_sha, current_sha] = commits
+    app = "notify_contract_#{System.unique_integer([:positive])}"
+    previous_health = "/tmp/#{app}_prod_previous_health.json"
+    File.write!(previous_health, ~s({"release_id":"v0.1.0-#{String.slice(deployed_sha, 0, 8)}-100"}))
+    File.write!(Path.join(tmp, "_build/RELEASE_ID"), "v0.1.1-#{String.slice(current_sha, 0, 8)}-200")
+    File.write!(Path.join(tmp, "_build/VERSION"), "0.1.1")
+
+    on_exit(fn ->
+      File.rm_rf!(tmp)
+      File.rm(previous_health)
+    end)
+
+    {message, 0} =
+      System.cmd("bash", [Path.join(@core, "notify_deployment.sh")],
+        cd: tmp,
+        env: [
+          {"CI_CD_OTP_APP", app},
+          {"CI_CD_DEPLOY_TARGET", "prod"},
+          {"CI_COMMIT_SHA", current_sha},
+          {"CI_COMMIT_BEFORE_SHA", second_sha},
+          {"CI_JOB_STATUS", "success"}
+        ],
+        stderr_to_stdout: true
+      )
+
+    assert message =~ "Commits: 3"
+    assert message =~ "Premier changement"
+    assert message =~ "Deuxième changement"
+    assert message =~ "Troisième changement"
+    refute message =~ "Version déployée"
+  end
+
   test "every shell script parses" do
     for script <- @shell_scripts do
       {output, status} =
