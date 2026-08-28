@@ -13,11 +13,22 @@ defmodule CiCdHarness.GitLabAcceptanceQualityTemplateTest do
     for path <- @templates do
       template = File.read!(path)
 
-      assert template =~ ~s(CI_CD_HARNESS_REF: "v0.4.34")
+      assert template =~ ~s(CI_CD_HARNESS_REF: "v0.4.35")
       assert template =~ "https://git.agile-u.com/olivierg/ci-cd-harness.git"
       assert template =~ ".ci-cd-harness/priv/core/"
       refute template =~ predecessor_name
       refute template =~ ".ci-cd-harness/scripts/"
+    end
+  end
+
+  test "artifact-producing GitLab jobs expire their artifacts after two weeks" do
+    for path <- @templates do
+      template = File.read!(path)
+
+      refute template =~ "expire_in: 1 week"
+      for artifact <- Regex.scan(~r/artifacts:\n(?: {4,}.*\n)*? {4}expire_in: ([^\n]+)/, template) do
+        assert List.last(artifact) == "2 weeks"
+      end
     end
   end
 

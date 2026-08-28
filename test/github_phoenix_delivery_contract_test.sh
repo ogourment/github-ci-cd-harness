@@ -18,6 +18,7 @@ grep -Fq '_build/VERSION' "$ci_workflow"
 grep -Fq 'tar -C _build/prod/rel -czf _build/release.tar.gz .' "$ci_workflow"
 [[ "$(grep -Fc 'tar -C _build/prod/rel -xzf _build/release.tar.gz' "$workflow")" -eq 2 ]]
 grep -Fq 'run: ${{ inputs.test-command }}' "$ci_workflow"
+[[ "$(grep -Fc 'retention-days: 14' "$ci_workflow")" -eq 2 ]]
 grep -Fq 'staging-ssh-known-hosts:' "$workflow"
 grep -Fq 'CI_CD_DEPLOY_SSH_KNOWN_HOSTS' "$deploy_script"
 

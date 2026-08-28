@@ -27,7 +27,7 @@
   stage: test
   variables:
     CI_CD_HARNESS_URL: "https://git.agile-u.com/olivierg/ci-cd-harness.git"
-    CI_CD_HARNESS_REF: "v0.4.34"
+    CI_CD_HARNESS_REF: "v0.4.35"
     EXUNIT_TEST_BUDGET_FILE: "config/test_budget.tsv"
     EXUNIT_TEST_BUDGET_LOGS: "test.log"
     EXUNIT_TEST_BUDGET_THRESHOLD_PERCENT: "10"
@@ -47,14 +47,14 @@
     when: always
     paths:
       - tmp/ci/exunit_test_budget_measured.tsv
-    expire_in: 1 week
+    expire_in: 2 weeks
 
 .ci_cd_exunit_test_value_audit:
   extends: .ci_cd_mix_cache
   stage: test
   variables:
     CI_CD_HARNESS_URL: "https://git.agile-u.com/olivierg/ci-cd-harness.git"
-    CI_CD_HARNESS_REF: "v0.4.34"
+    CI_CD_HARNESS_REF: "v0.4.35"
     EXUNIT_TEST_VALUE_AUDIT_OUTPUT_DIR: "tmp/ci/exunit_test_value_audit"
     EXUNIT_TEST_VALUE_AUDIT_OVERLAP_THRESHOLD: "0.95"
     EXUNIT_TEST_VALUE_AUDIT_MIN_OVERLAP_POINTS: "10"
@@ -72,7 +72,7 @@
     when: always
     paths:
       - $EXUNIT_TEST_VALUE_AUDIT_OUTPUT_DIR/
-    expire_in: 1 week
+    expire_in: 2 weeks
   allow_failure: true
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'

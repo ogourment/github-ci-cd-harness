@@ -94,6 +94,7 @@ jobs:
           name: acceptance-evidence
           path: tmp/atdd
           if-no-files-found: warn
+          retention-days: 14
       - name: Build production assets
         env:
           MIX_ENV: prod
@@ -125,3 +126,4 @@ jobs:
             _build/VERSION
             _build/release.tar.gz
           if-no-files-found: error
+          retention-days: 14
