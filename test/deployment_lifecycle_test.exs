@@ -53,12 +53,21 @@ defmodule CiCdHarness.DeploymentLifecycleTest do
   end
 
   test "rejects unknown lifecycle events without calling the consumer" do
+    fixture =
+      Path.join(System.tmp_dir!(), "ci-cd-lifecycle-#{System.unique_integer([:positive])}")
+
+    hook = Path.join(fixture, "hook")
+    File.mkdir_p!(fixture)
+    File.write!(hook, "#!/usr/bin/env bash\nexit 0\n")
+    File.chmod!(hook, 0o755)
+    on_exit(fn -> File.rm_rf!(fixture) end)
+
     {message, 64} =
       System.cmd(
         "bash",
         [
           @dispatcher,
-          "/bin/true",
+          hook,
           "5",
           "begin-shutdown",
           "id",

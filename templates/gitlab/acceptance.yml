@@ -1,6 +1,6 @@
 variables:
   CI_CD_HARNESS_URL: "https://git.agile-u.com/olivierg/ci-cd-harness.git"
-  CI_CD_HARNESS_REF: "v0.4.36"
+  CI_CD_HARNESS_REF: "v0.4.37"
   # Publishing a report to GitLab Pages creates a Pages deployment. Keep that
   # separate from acceptance verification, so consumers opt in deliberately.
   CI_CD_ENABLE_ACCEPTANCE_REPORT_PAGES: "false"
@@ -15,9 +15,27 @@ acceptance_fast:
     - when: never
   variables:
     ACCEPTANCE_PHASE: "fast"
+    # Optional consumer setup is timed separately from the scenario command.
+    # It must be safe to rerun: CI retries execute it again.
+    ACCEPTANCE_FAST_SETUP_COMMAND: ""
     ACCEPTANCE_SELECTION_PLAN: "tmp/acceptance-selection.json"
     ACCEPTANCE_FAST_EVIDENCE_DIR: "tmp/atdd-fast"
     ACCEPTANCE_FAST_SUMMARY_PATH: "tmp/atdd-fast/release_summary.txt"
+    ACCEPTANCE_FAST_TIMING_PATH: "tmp/atdd-fast/timing.env"
+  before_script:
+    - |
+      if [ -n "${ACCEPTANCE_FAST_SETUP_COMMAND:-}" ]; then
+        if [ ! -x .ci-cd-harness/priv/core/acceptance_fast_timing.sh ]; then
+          : "${CI_CD_HARNESS_URL:?CI_CD_HARNESS_URL is required}"
+          : "${CI_CD_HARNESS_REF:?CI_CD_HARNESS_REF is required for fast acceptance}"
+          rm -rf .ci-cd-harness
+          git clone --quiet --depth 1 --branch "$CI_CD_HARNESS_REF" \
+            "${CI_CD_HARNESS_URL}" \
+            .ci-cd-harness
+        fi
+        .ci-cd-harness/priv/core/acceptance_fast_timing.sh setup \
+          "$ACCEPTANCE_FAST_SETUP_COMMAND"
+      fi
   script:
     - |
       if [ ! -x .ci-cd-harness/priv/core/pipeline_acceptance_report.sh ]; then
@@ -29,13 +47,13 @@ acceptance_fast:
           .ci-cd-harness
       fi
     - ': "${ACCEPTANCE_FAST_COMMAND:?ACCEPTANCE_FAST_COMMAND is required}"'
-    - bash -lc "$ACCEPTANCE_FAST_COMMAND"
+    - .ci-cd-harness/priv/core/acceptance_fast_timing.sh test "$ACCEPTANCE_FAST_COMMAND"
   after_script:
     - |
       set +e
       mkdir -p "${ACCEPTANCE_FAST_EVIDENCE_DIR:-tmp/atdd-fast}"
-      .ci-cd-harness/priv/core/pipeline_acceptance_report.sh staging \
-        > "${ACCEPTANCE_FAST_SUMMARY_PATH:-tmp/atdd-fast/release_summary.txt}"
+      .ci-cd-harness/priv/core/acceptance_fast_timing.sh teardown \
+        ".ci-cd-harness/priv/core/pipeline_acceptance_report.sh staging > ${ACCEPTANCE_FAST_SUMMARY_PATH:-tmp/atdd-fast/release_summary.txt}"
   artifacts:
     when: always
     paths:

@@ -27,6 +27,7 @@ defmodule CiCdHarness.GitLabAcceptanceQualityTemplateTest do
       template = File.read!(path)
 
       refute template =~ "expire_in: 1 week"
+
       for artifact <- Regex.scan(~r/artifacts:\n(?: {4,}.*\n)*? {4}expire_in: ([^\n]+)/, template) do
         assert List.last(artifact) == "2 weeks"
       end
@@ -47,6 +48,11 @@ defmodule CiCdHarness.GitLabAcceptanceQualityTemplateTest do
 
     assert template =~ "acceptance_fast:"
     assert template =~ "ACCEPTANCE_FAST_COMMAND"
+    assert template =~ "ACCEPTANCE_FAST_SETUP_COMMAND"
+    assert template =~ "ACCEPTANCE_FAST_TIMING_PATH"
+    assert template =~ "acceptance_fast_timing.sh setup"
+    assert template =~ "acceptance_fast_timing.sh test"
+    assert template =~ "acceptance_fast_timing.sh teardown"
     assert template =~ "pipeline_acceptance_report.sh staging"
     assert template =~ "acceptance_evidence:"
 

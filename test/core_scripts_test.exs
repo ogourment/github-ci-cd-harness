@@ -11,6 +11,7 @@ defmodule CiCdHarness.CoreScriptsTest do
 
   @scripts ~w(
     acceptance_evidence.sh
+    acceptance_fast_timing.sh
     atdd_generate_thumbnails.sh
     atdd_remote_copy.sh
     ci_cd_alert_event.sh
@@ -77,7 +78,12 @@ defmodule CiCdHarness.CoreScriptsTest do
     git.(["config", "user.name", "Delivery Test"])
 
     commits =
-      for subject <- ["Version déployée", "Premier changement", "Deuxième changement", "Troisième changement"] do
+      for subject <- [
+            "Version déployée",
+            "Premier changement",
+            "Deuxième changement",
+            "Troisième changement"
+          ] do
         File.write!(Path.join(tmp, "change.txt"), subject)
         git.(["add", "change.txt"])
         git.(["commit", "-q", "-m", subject])
@@ -87,8 +93,17 @@ defmodule CiCdHarness.CoreScriptsTest do
     [deployed_sha, _first_sha, second_sha, current_sha] = commits
     app = "notify_contract_#{System.unique_integer([:positive])}"
     previous_health = "/tmp/#{app}_prod_previous_health.json"
-    File.write!(previous_health, ~s({"release_id":"v0.1.0-#{String.slice(deployed_sha, 0, 8)}-100"}))
-    File.write!(Path.join(tmp, "_build/RELEASE_ID"), "v0.1.1-#{String.slice(current_sha, 0, 8)}-200")
+
+    File.write!(
+      previous_health,
+      ~s({"release_id":"v0.1.0-#{String.slice(deployed_sha, 0, 8)}-100"})
+    )
+
+    File.write!(
+      Path.join(tmp, "_build/RELEASE_ID"),
+      "v0.1.1-#{String.slice(current_sha, 0, 8)}-200"
+    )
+
     File.write!(Path.join(tmp, "_build/VERSION"), "0.1.1")
 
     on_exit(fn ->
@@ -123,6 +138,46 @@ defmodule CiCdHarness.CoreScriptsTest do
 
       assert status == 0, "#{script} does not parse: #{output}"
     end
+  end
+
+  test "fast acceptance timing records setup and test phases with workspace peak" do
+    tmp = Path.join(System.tmp_dir!(), "ci-cd-fast-timing-#{System.unique_integer([:positive])}")
+    timing = Path.join(tmp, "tmp/atdd-fast/timing.env")
+    File.mkdir_p!(tmp)
+    on_exit(fn -> File.rm_rf!(tmp) end)
+
+    {output, 0} =
+      System.cmd(
+        "bash",
+        [
+          Path.join(@core, "acceptance_fast_timing.sh"),
+          "setup",
+          "mkdir -p _build/test && dd if=/dev/zero of=_build/test/build.bin bs=1024 count=2 status=none"
+        ],
+        cd: tmp,
+        env: [{"ACCEPTANCE_FAST_TIMING_PATH", timing}],
+        stderr_to_stdout: true
+      )
+
+    assert output == ""
+
+    {_, 0} =
+      System.cmd(
+        "bash",
+        [Path.join(@core, "acceptance_fast_timing.sh"), "test", "test -f _build/test/build.bin"],
+        cd: tmp,
+        env: [{"ACCEPTANCE_FAST_TIMING_PATH", timing}],
+        stderr_to_stdout: true
+      )
+
+    timing = File.read!(timing)
+    assert timing =~ "acceptance_fast_setup_elapsed_seconds="
+    assert timing =~ ~r/acceptance_fast_setup_workspace_before_kb=\d+/
+    assert timing =~ ~r/acceptance_fast_setup_workspace_peak_kb=[1-9]\d*/
+    assert timing =~ "acceptance_fast_test_elapsed_seconds="
+    assert timing =~ ~r/acceptance_fast_test_workspace_before_kb=[1-9]\d*/
+    assert timing =~ ~r/acceptance_fast_test_workspace_peak_kb=[1-9]\d*/
+    assert timing =~ "acceptance_fast_test_exit_code=0"
   end
 
   # The audit shipped without the two .exs files it runs, and failed in CI at
