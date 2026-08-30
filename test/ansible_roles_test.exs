@@ -62,6 +62,7 @@ defmodule CiCdHarness.AnsibleRolesTest do
       File.read!(Path.join(@roles_root, "phoenix_blue_green/templates/phoenix_deploy.sh.j2"))
 
     assert defaults =~ ~s(deploy_lifecycle_hook: "")
+    assert defaults =~ ~s(deploy_lifecycle_state_file: "")
     assert defaults =~ "deploy_lifecycle_window_sec: 600"
     assert tasks =~ "Install deployment lifecycle dispatcher"
 
@@ -76,6 +77,8 @@ defmodule CiCdHarness.AnsibleRolesTest do
     assert begin_offset < migration_offset
     assert verified_cutover_offset < complete_offset
     assert deploy =~ "dispatch_deployment_lifecycle deployment-aborted"
+    assert deploy =~ ~s(LIFECYCLE_STATE_FILE="{{ deploy_lifecycle_state_file }}")
+    assert deploy =~ ~s("${LIFECYCLE_STATE_FILE}")
     refute deploy =~ "deployment-active"
   end
 

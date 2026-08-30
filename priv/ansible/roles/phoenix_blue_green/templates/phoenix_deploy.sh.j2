@@ -43,6 +43,7 @@ STANDBY_END_SCRIPT="{{ deploy_standby_end_script }}"
 STANDBY_UNIT="{{ app_name }}-standby-end"
 OPERATION_LOCK_PATH="{{ deploy_operation_lock_path }}"
 LIFECYCLE_HOOK="{{ deploy_lifecycle_hook }}"
+LIFECYCLE_STATE_FILE="{{ deploy_lifecycle_state_file }}"
 LIFECYCLE_DISPATCH="{{ deploy_lifecycle_dispatch_script }}"
 LIFECYCLE_TIMEOUT_SEC={{ deploy_lifecycle_timeout_sec | int }}
 LIFECYCLE_WINDOW_SEC={{ deploy_lifecycle_window_sec | int }}
@@ -194,7 +195,7 @@ trap on_deploy_error ERR
 dispatch_deployment_lifecycle() {
   local event="$1"
 
-  [[ -n "${LIFECYCLE_HOOK}" ]] || return 0
+  [[ -n "${LIFECYCLE_HOOK}" || -n "${LIFECYCLE_STATE_FILE}" ]] || return 0
   sudo -u "${DEPLOY_USER}" "${LIFECYCLE_DISPATCH}" \
     "${LIFECYCLE_HOOK}" \
     "${LIFECYCLE_TIMEOUT_SEC}" \
@@ -205,7 +206,8 @@ dispatch_deployment_lifecycle() {
     "${DEPLOY_ENV}" \
     "${CURRENT_COLOR}" \
     "${TARGET_COLOR}" \
-    "${LIFECYCLE_EXPIRES_AT_EPOCH}"
+    "${LIFECYCLE_EXPIRES_AT_EPOCH}" \
+    "${LIFECYCLE_STATE_FILE}"
 }
 
 cancel_standby_timer() {
@@ -530,7 +532,7 @@ chown "{{ deploy_user }}:{{ deploy_user }}" "${tmp_env}"
 chmod 600 "${tmp_env}"
 mv "${tmp_env}" "${TARGET_METADATA_ENV_FILE}"
 
-if [[ -n "${LIFECYCLE_HOOK}" ]]; then
+if [[ -n "${LIFECYCLE_HOOK}" || -n "${LIFECYCLE_STATE_FILE}" ]]; then
   LIFECYCLE_EXPIRES_AT_EPOCH=$(( $(date -u +%s) + LIFECYCLE_WINDOW_SEC ))
   echo "==> Preparing ${CURRENT_COLOR} for deployment..."
   dispatch_deployment_lifecycle begin-deployment

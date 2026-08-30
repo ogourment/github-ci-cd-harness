@@ -1,7 +1,7 @@
 defmodule CiCdHarness.MixProject do
   use Mix.Project
 
-  @version "0.4.37"
+  @version "0.4.38"
 
   def project do
     [

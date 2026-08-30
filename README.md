@@ -45,7 +45,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.37", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.38", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -101,7 +101,7 @@ the same provider-neutral implementation. The package includes `common`,
 `phoenix_postgres`, `phoenix_blue_green`, `web`, `phoenix_backup`, and
 `system_toolbox_identity`.
 
-### Deployment lifecycle hook
+### Deployment lifecycle transport
 
 The `phoenix_blue_green` role can call an optional consumer-owned executable
 configured with `deploy_lifecycle_hook`. It sends `begin-deployment` before
@@ -117,6 +117,14 @@ current and target colors, and an expiry epoch are available through
 than `CI_CD_DEPLOYMENT_EXPIRES_AT_EPOCH`; terminal events may clear it earlier.
 The contract does not require a shared filesystem marker.
 
+When release distribution is disabled, set `deploy_lifecycle_state_file` to an
+absolute host path readable by the application. The shared deploy service then
+writes the deployment ID and bounded expiry before migrations and removes only
+its own marker after completion or abort. This host-managed path does not invoke
+release RPC and may be used without a consumer hook. `deploy_lifecycle_hook`
+remains available for consumers with another supported transport; both may be
+enabled when both effects are intentional.
+
 ## Environment badging
 
 Non-production deployments should say so. See
@@ -130,10 +138,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.37/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.37/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.37/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.37/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.38/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.38/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.38/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.38/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable

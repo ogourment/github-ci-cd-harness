@@ -26,6 +26,7 @@
       - deploy_lifecycle_timeout_sec | int > 0
       - deploy_lifecycle_window_sec | int > 0
       - deploy_lifecycle_hook | length == 0 or deploy_lifecycle_hook is match('^/')
+      - deploy_lifecycle_state_file | length == 0 or deploy_lifecycle_state_file is match('^/')
     quiet: true
 
 - name: Ensure app root exists

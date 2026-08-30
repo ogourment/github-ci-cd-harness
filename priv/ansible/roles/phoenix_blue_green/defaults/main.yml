@@ -31,6 +31,11 @@ deploy_operation_lock_path: "/run/lock/{{ app_name }}-operations.lock"
 # Optional consumer-owned executable receiving begin-deployment before shared
 # migrations and one terminal event after verified cutover or deployment abort.
 deploy_lifecycle_hook: ""
+# Distribution-free lifecycle transport. The host deploy path writes the
+# deployment ID and bounded expiry here before migrations, then removes only
+# its own marker after verified completion or abort. Applications may read the
+# file without requiring a live distributed Erlang node.
+deploy_lifecycle_state_file: ""
 deploy_lifecycle_dispatch_script: "/usr/local/lib/ci-cd-harness/deployment_lifecycle"
 deploy_lifecycle_timeout_sec: 15
 deploy_lifecycle_window_sec: 600

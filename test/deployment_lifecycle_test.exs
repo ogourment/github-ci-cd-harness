@@ -83,4 +83,89 @@ defmodule CiCdHarness.DeploymentLifecycleTest do
 
     assert message =~ "Unsupported deployment lifecycle event: begin-shutdown"
   end
+
+  test "records bounded lifecycle state without release distribution or a consumer hook" do
+    fixture =
+      Path.join(System.tmp_dir!(), "ci-cd-lifecycle-state-#{System.unique_integer([:positive])}")
+
+    state_file = Path.join(fixture, "deployment_lifecycle")
+    File.mkdir_p!(fixture)
+    on_exit(fn -> File.rm_rf!(fixture) end)
+
+    assert {_, 0} =
+             System.cmd(
+               "bash",
+               [
+                 @dispatcher,
+                 "",
+                 "5",
+                 "begin-deployment",
+                 "production:release-1",
+                 "release-1",
+                 "42",
+                 "production",
+                 "green",
+                 "blue",
+                 "1787520000",
+                 state_file
+               ],
+               stderr_to_stdout: true
+             )
+
+    assert File.read!(state_file) == "production:release-1\n1787520000\n"
+
+    assert {_, 0} =
+             System.cmd(
+               "bash",
+               [
+                 @dispatcher,
+                 "",
+                 "5",
+                 "deployment-complete",
+                 "production:release-1",
+                 "release-1",
+                 "42",
+                 "production",
+                 "green",
+                 "blue",
+                 "1787520000",
+                 state_file
+               ],
+               stderr_to_stdout: true
+             )
+
+    refute File.exists?(state_file)
+  end
+
+  test "does not clear lifecycle state belonging to another deployment" do
+    fixture =
+      Path.join(System.tmp_dir!(), "ci-cd-lifecycle-state-#{System.unique_integer([:positive])}")
+
+    state_file = Path.join(fixture, "deployment_lifecycle")
+    File.mkdir_p!(fixture)
+    File.write!(state_file, "production:newer-release\n1787529999\n")
+    on_exit(fn -> File.rm_rf!(fixture) end)
+
+    assert {_, 0} =
+             System.cmd(
+               "bash",
+               [
+                 @dispatcher,
+                 "",
+                 "5",
+                 "deployment-aborted",
+                 "production:older-release",
+                 "older-release",
+                 "41",
+                 "production",
+                 "green",
+                 "blue",
+                 "1787520000",
+                 state_file
+               ],
+               stderr_to_stdout: true
+             )
+
+    assert File.read!(state_file) == "production:newer-release\n1787529999\n"
+  end
 end
