@@ -115,6 +115,16 @@ defmodule CiCdHarness.AnsibleRolesTest do
              2
   end
 
+  test "web role rejects common framework and secret-file probes before proxying" do
+    template = File.read!(Path.join(@roles_root, "web/templates/app.nginx.j2"))
+
+    assert template =~ "(?:api/|v[0-9]+/)?actuator"
+    assert template =~ "terraform\\.tf(?:state|vars)"
+    assert template =~ "(?:backup|dump|www|web|site|smtp)\\.(?:sql|zip)"
+    assert template =~ "access_log off;"
+    assert template =~ "return 404;"
+  end
+
   defp byte_offset!(text, pattern) do
     {offset, _length} = :binary.match(text, pattern)
     offset

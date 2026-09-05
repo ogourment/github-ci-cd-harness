@@ -11,6 +11,8 @@ server_aliases: []
 nginx_legacy_site_names: []
 nginx_legacy_upstream_includes: []
 nginx_drop_scanner_probes: true
+# Disable only for an application that intentionally serves one of the common
+# framework, secret/configuration, database-dump, or archive probe paths.
 
 # Set false on staging and any other non-production deployment. When false the
 # vhost emits X-Robots-Tag: noindex, nofollow on every response, so a review

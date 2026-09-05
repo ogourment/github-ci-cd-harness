@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.39
+
+- Reject common framework, configuration, secret-file, database-dump, and
+  archive probes in nginx before they reach the application.
+
 ## 0.4.38
 
 - Add a host-managed deployment lifecycle state-file transport for releases

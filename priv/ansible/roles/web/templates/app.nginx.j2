@@ -125,7 +125,25 @@ server {
         return 404;
     }
 
-    location ~* ^/(wp-admin|wp-content|wp-includes|wp-json|wordpress|xmlrpc\.php|vendor/phpunit|phpmyadmin|pma|cgi-bin|boaform|manager/html|server-status|actuator) {
+    location ~* ^/(wp-admin|wp-content|wp-includes|wp-json|wordpress|xmlrpc\.php|vendor/phpunit|phpmyadmin|pma|cgi-bin|boaform|manager/html|server-status)(?:/|$) {
+        access_log off;
+        log_not_found off;
+        return 404;
+    }
+
+    location ~* ^/(?:api/|v[0-9]+/)?actuator(?:/|$) {
+        access_log off;
+        log_not_found off;
+        return 404;
+    }
+
+    location ~* (?:^|/)(?:terraform\.tf(?:state|vars)(?:\.backup|\.json)?|docker-compose\.ya?ml|service-account\.json|serviceaccount\.json|credentials\.json|secrets\.json|tokens\.json|database\.ya?ml|application\.(?:ya?ml|properties)|config\.(?:json|ya?ml)|settings\.(?:ini|json|py|ya?ml))$ {
+        access_log off;
+        log_not_found off;
+        return 404;
+    }
+
+    location ~* (?:^|/)(?:backup|dump|www|web|site|smtp)\.(?:sql|zip)$ {
         access_log off;
         log_not_found off;
         return 404;
