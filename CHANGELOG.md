@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.40
+
+- Package acceptance evidence in the exact Phoenix release artifact when both
+  browser acceptance and release builds are enabled. Previously evidence was
+  retained on GitHub but never transported by the delivery job, leaving live
+  acceptance stores stale despite green tests. Consumers import the packaged
+  `priv/acceptance_evidence/evidence.json` using their existing offline release
+  migration entry point; no distributed RPC or duplicate application boot is
+  required. Consumers without browser acceptance are unchanged.
+
 ## 0.4.39
 
 - Reject common framework, configuration, secret-file, database-dump, and

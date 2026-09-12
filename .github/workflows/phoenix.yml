@@ -113,6 +113,17 @@ jobs:
           mkdir -p _build
           printf '%s\n' "$version" > _build/VERSION
           printf '%s-%s-%s\n' "$RELEASE_ID_PREFIX" "$version" "$GITHUB_RUN_ID" > _build/RELEASE_ID
+      - name: Package verified acceptance evidence with the exact release
+        if: ${{ inputs.build-release && inputs.run-acceptance }}
+        run: |
+          set -euo pipefail
+          test -s tmp/atdd/evidence.json
+          version="$(cat _build/VERSION)"
+          app="$(mix run --no-start -e 'IO.write(Mix.Project.config()[:app])')"
+          destination="_build/prod/rel/$app/lib/$app-$version/priv/acceptance_evidence"
+          test -d "$(dirname "$destination")"
+          mkdir -p "$destination"
+          cp -a tmp/atdd/. "$destination/"
       - name: Archive production release with Unix permissions
         if: ${{ inputs.build-release }}
         run: tar -C _build/prod/rel -czf _build/release.tar.gz .
