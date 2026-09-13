@@ -25,4 +25,29 @@ grep -Fq 'run: ${{ inputs.test-command }}' "$ci_workflow"
 grep -Fq 'staging-ssh-known-hosts:' "$workflow"
 grep -Fq 'CI_CD_DEPLOY_SSH_KNOWN_HOSTS' "$deploy_script"
 
+promotion="$repo_root/.github/workflows/phoenix-promote-production.yml"
+grep -Fq 'name: production' "$promotion"
+grep -Fq 'actions: read' "$promotion"
+grep -Fq 'run-id: ${{ inputs.source-run-id }}' "$promotion"
+grep -Fq 'priv/forges/github/verify_promotion.py' "$promotion"
+grep -Fq 'priv/core/release_tag.sh preflight' "$promotion"
+grep -Fq 'priv/core/deploy_release_fast.sh production' "$promotion"
+grep -Fq 'priv/core/release_tag.sh publish' "$promotion"
+! grep -Eq 'mix |deploy_release_fast.sh staging|needs: deploy_staging' "$promotion"
+
+python3 - "$repo_root" <<'PY'
+import pathlib, sys, yaml
+root = pathlib.Path(sys.argv[1])
+for path in [*root.glob('.github/workflows/*.yml'), *root.glob('templates/github/*.yml')]:
+    assert isinstance(yaml.safe_load(path.read_text()), dict), path
+workflow = yaml.safe_load((root / '.github/workflows/phoenix-promote-production.yml').read_text())
+steps = workflow['jobs']['promote_production']['steps']
+runs = [s.get('run', '') for s in steps]
+def index(fragment):
+    return next(i for i, command in enumerate(runs) if fragment in command)
+assert index('verify_promotion.py') < index('release_tag.sh preflight') < index('deploy_release_fast.sh production') < index('release_tag.sh publish')
+stage = yaml.safe_load((root / '.github/workflows/phoenix-delivery.yml').read_text())['jobs']['deploy_staging']['steps']
+assert next(i for i, s in enumerate(stage) if 'staging_release_smoke.sh' in s.get('run', '')) < next(i for i, s in enumerate(stage) if 'staging_receipt.py' in s.get('run', ''))
+PY
+
 printf 'github_phoenix_delivery_contract_test: ok\n'

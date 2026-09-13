@@ -26,7 +26,7 @@ on:
         required: true
       production-environment-url:
         type: string
-        required: true
+        default: ""
     secrets:
       staging-host:
         required: true
@@ -41,17 +41,17 @@ on:
       staging-remote-deploy-script:
         required: true
       production-host:
-        required: true
+        required: false
       production-ssh-host:
         required: false
       production-ssh-user:
-        required: true
+        required: false
       production-ssh-private-key:
-        required: true
+        required: false
       production-ssh-known-hosts:
-        required: true
+        required: false
       production-remote-deploy-script:
-        required: true
+        required: false
 
 permissions:
   contents: write
@@ -68,6 +68,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: ogourment/github-ci-cd-harness
+          ref: v0.4.41
           path: .ci-cd-harness
       - uses: actions/download-artifact@v4
         with:
@@ -99,8 +100,21 @@ jobs:
         env:
           CI_CD_STAGING_SMOKE_URL: ${{ inputs.staging-environment-url }}/
         run: bash .ci-cd-harness/priv/core/staging_release_smoke.sh
+      - name: Record staging verification for later promotion
+        env:
+          RELEASE_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        run: python3 .ci-cd-harness/priv/forges/github/staging_receipt.py > _build/staging-verification.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}-staging-verification
+          path: _build/staging-verification.json
+          if-no-files-found: error
+          retention-days: 14
 
   deploy_production:
+    concurrency:
+      group: ${{ github.repository }}-production
+      cancel-in-progress: false
     if: ${{ inputs.deploy-production && github.ref == 'refs/heads/main' }}
     needs: deploy_staging
     runs-on: ubuntu-latest
@@ -112,6 +126,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: ogourment/github-ci-cd-harness
+          ref: v0.4.41
           path: .ci-cd-harness
       - uses: actions/download-artifact@v4
         with:
@@ -151,6 +166,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: ogourment/github-ci-cd-harness
+          ref: v0.4.41
           path: .ci-cd-harness
       - uses: actions/download-artifact@v4
         with:

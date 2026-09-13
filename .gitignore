@@ -2,3 +2,4 @@ _build/
 deps/
 *.ez
 tmp/
+__pycache__/

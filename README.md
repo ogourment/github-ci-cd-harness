@@ -3,6 +3,46 @@
 Provider-neutral CI/CD delivery for Elixir applications, consumed as a tagged
 git dependency.
 
+## GitHub: build once, stage automatically, promote manually
+
+Copy and configure [the CI/staging caller](templates/github/ci.yml) and
+[the manual production caller](templates/github/promote-production.yml).
+They use the shared Phoenix workflows: no consumer-local deployment script is
+needed. Enable `run-acceptance` and your existing test command in the CI caller
+when your application has browser acceptance tests.
+
+Push to `main` builds/tests one release, deploys it to staging, verifies its
+health identity and public HTML, and uploads a staging-verification receipt.
+After reviewing staging, open **Actions → Promote production → Run workflow**,
+select `main`, and enter the successful staging CI run's numeric ID from its
+`/actions/runs/<id>` URL. This production-only workflow does not rerun CI or
+touch staging. It downloads that run's release and receipt, checks repository,
+workflow path, main-branch event, successful run/attempt and staging job, then
+checks the archive SHA-256, version, release ID and source commit.
+
+Configure the GitHub `production` environment with required reviewers and a
+main-branch deployment policy. The workflow uses that environment; approval is
+not created automatically by YAML. Its caller must grant `actions: read` and
+`contents: write`. Map production SSH secrets explicitly, or define matching
+secret names on the protected environment. Configure staging separately.
+
+Both artifacts expire after 14 days. Old runs without a receipt are deliberately
+ineligible: adopt this version and complete a fresh staging CI run first.
+Missing, expired, failed, PR, wrong-workflow or stale-attempt sources fail closed.
+An explicitly selected older eligible run is an intentional rollback; promotion
+does not infer "latest" or require it to be the release currently on staging.
+The selected commit is checked out before tag preflight and deployment; tag
+publication follows successful production health verification. Release health
+retains the **source** run identity; the job summary records the separate
+promotion run and actor. Production jobs share a non-cancelling concurrency
+group (GitHub concurrency is not a FIFO deployment queue).
+
+`phoenix-delivery.yml` still supports combined staging/production delivery for
+compatibility. Do not expose its `deploy-production` input as the normal manual
+production action: use the separate promotion caller instead. The shared core
+still owns SSH/rsync transport, migrations, health verification and release tags;
+only GitHub provenance/artifact selection lives in the GitHub adapter.
+
 ## Why this exists
 
 The predecessor was shared through GitLab's `include: project:file:ref`, which
@@ -45,7 +85,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.40", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.41", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -138,10 +178,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.40/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.40/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.40/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.40/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.41/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.41/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.41/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.41/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable

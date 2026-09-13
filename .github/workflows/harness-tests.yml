@@ -39,6 +39,8 @@ jobs:
         run: mix test
       - name: Run GitHub workflow contracts
         run: test/github_phoenix_delivery_contract_test.sh
+      - name: Verify staging-to-production promotion flows
+        run: python3 -m unittest discover -s test -p github_promotion_test.py -v
       - name: Run backup and restore integration
         env:
           BACKUP_RESTORE_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres

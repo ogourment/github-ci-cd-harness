@@ -1,0 +1,33 @@
+# Copy to .github/workflows/ci.yml; replace example app/config.
+name: CI and staging
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: write
+jobs:
+  phoenix:
+    uses: ogourment/github-ci-cd-harness/.github/workflows/phoenix.yml@v0.4.41
+    with:
+      build-release: true
+      release-artifact-name: phoenix-release
+      release-id-prefix: example-app
+  delivery:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: phoenix
+    uses: ogourment/github-ci-cd-harness/.github/workflows/phoenix-delivery.yml@v0.4.41
+    with:
+      artifact-name: phoenix-release
+      otp-app: example_app
+      remote-env-prefix: EXAMPLE_APP
+      deploy-staging: true
+      deploy-production: false
+      staging-environment-url: https://staging.example.org
+    secrets:
+      staging-host: ${{ secrets.STAGING_HOST }}
+      staging-ssh-host: ${{ secrets.STAGING_SSH_HOST }}
+      staging-ssh-user: ${{ secrets.STAGING_SSH_USER }}
+      staging-ssh-private-key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+      staging-ssh-known-hosts: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+      staging-remote-deploy-script: ${{ secrets.STAGING_REMOTE_DEPLOY_SCRIPT }}

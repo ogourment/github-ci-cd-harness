@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.41
+
+- Add a production-only Phoenix promotion workflow and copy-ready GitHub CI,
+  staging and manual-promotion callers. Promotion downloads an explicit successful
+  staging run's artifact, verifies its byte digest and staging receipt, preserves
+  its commit/version/release ID, and reuses the existing deployment and tagging
+  core without rebuilding or redeploying staging. Missing/expired artifacts,
+  untrusted runs and stale attempts fail before production mutation. Production
+  promotion and combined delivery share a non-cancelling concurrency group.
+- Record staging receipts only after deployed identity and HTML smoke checks;
+  pin shared delivery scripts to the harness release. Stage-only delivery no
+  longer requires production credentials.
+
 ## 0.4.40
 
 - Package acceptance evidence in the exact Phoenix release artifact when both

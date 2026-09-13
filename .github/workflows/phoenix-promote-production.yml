@@ -1,0 +1,126 @@
+name: Promote staging-verified Phoenix release
+
+on:
+  workflow_call:
+    inputs:
+      source-run-id:
+        type: string
+        required: true
+      source-workflow:
+        type: string
+        default: .github/workflows/ci.yml
+      artifact-name:
+        type: string
+        default: phoenix-release
+      otp-app:
+        type: string
+        required: true
+      remote-env-prefix:
+        type: string
+        required: true
+      production-environment-url:
+        type: string
+        required: true
+    secrets:
+      production-host:
+        required: true
+      production-ssh-host:
+        required: false
+      production-ssh-user:
+        required: true
+      production-ssh-private-key:
+        required: true
+      production-ssh-known-hosts:
+        required: true
+      production-remote-deploy-script:
+        required: true
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  promote_production:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.repository }}-production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: ${{ inputs.production-environment-url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+        with:
+          repository: ogourment/github-ci-cd-harness
+          ref: v0.4.41
+          path: .ci-cd-harness
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: _build
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source-run-id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}-staging-verification
+          path: _verification
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source-run-id }}
+      - name: Verify source run, staging receipt and release bytes
+        id: verified
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source-run-id }}
+          SOURCE_WORKFLOW: ${{ inputs.source-workflow }}
+          RELEASE_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        run: python3 .ci-cd-harness/priv/forges/github/verify_promotion.py
+      - name: Check out the verified source commit, not today's main
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.verified.outputs.sha }}
+          fetch-depth: 0
+          clean: false
+      - name: Reject conflicting release tags before deployment
+        env:
+          CI_CD_RELEASE_VERSION_COMMAND: cat _build/VERSION
+          CI_COMMIT_SHA: ${{ steps.verified.outputs.sha }}
+        run: .ci-cd-harness/priv/core/release_tag.sh preflight
+      - name: Restore the exact staging-verified release
+        run: |
+          mkdir -p _build/prod/rel
+          tar -C _build/prod/rel -xzf _build/release.tar.gz
+      - name: Promote and verify production health identity
+        env:
+          CI_CD_OTP_APP: ${{ inputs.otp-app }}
+          CI_CD_DEPLOY_HOST: ${{ secrets.production-host }}
+          CI_CD_DEPLOY_SSH_HOST: ${{ secrets.production-ssh-host }}
+          CI_CD_DEPLOY_SSH_USER: ${{ secrets.production-ssh-user }}
+          CI_CD_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.production-ssh-private-key }}
+          CI_CD_DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.production-ssh-known-hosts }}
+          CI_CD_REMOTE_DEPLOY_SCRIPT: ${{ secrets.production-remote-deploy-script }}
+          CI_CD_REMOTE_ENV_PREFIX: ${{ inputs.remote-env-prefix }}
+          CI_CD_RELEASE_ARTIFACT_PATH: _build/prod/rel/${{ inputs.otp-app }}
+          CI_CD_HEALTH_URL: ${{ inputs.production-environment-url }}/health
+          CI_COMMIT_SHA: ${{ steps.verified.outputs.sha }}
+          CI_COMMIT_REF_NAME: main
+          CI_PIPELINE_ID: ${{ inputs.source-run-id }}
+          CI_PIPELINE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ inputs.source-run-id }}
+          GITLAB_USER_LOGIN: ${{ github.actor }}
+        run: .ci-cd-harness/priv/core/deploy_release_fast.sh production
+      - name: Tag only the successfully verified production release
+        env:
+          CI_CD_RELEASE_VERSION_COMMAND: cat _build/VERSION
+          CI_COMMIT_SHA: ${{ steps.verified.outputs.sha }}
+          CI_REPOSITORY_URL: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+          CI_CD_RELEASE_TAGGER_NAME: GitHub Actions release
+          CI_CD_RELEASE_TAGGER_EMAIL: release@github-actions.invalid
+        run: .ci-cd-harness/priv/core/release_tag.sh publish
+      - name: Summarize promoted identity
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source-run-id }}
+          RELEASE_ID: ${{ steps.verified.outputs.release_id }}
+          SOURCE_SHA: ${{ steps.verified.outputs.sha }}
+        run: |
+          printf 'Promoted `%s` (`%s`) from staging run %s.\n\nPromotion run %s; actor %s.\n' "$RELEASE_ID" "$SOURCE_SHA" "$SOURCE_RUN_ID" "$GITHUB_RUN_ID" "$GITHUB_ACTOR" >> "$GITHUB_STEP_SUMMARY"

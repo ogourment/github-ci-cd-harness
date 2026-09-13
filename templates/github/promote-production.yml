@@ -1,0 +1,29 @@
+# Copy to .github/workflows/promote-production.yml; replace example app/config.
+name: Promote production
+on:
+  workflow_dispatch:
+    inputs:
+      source-run-id:
+        description: Successful staging CI run ID (not a commit SHA)
+        type: string
+        required: true
+permissions:
+  actions: read
+  contents: write
+jobs:
+  production:
+    uses: ogourment/github-ci-cd-harness/.github/workflows/phoenix-promote-production.yml@v0.4.41
+    with:
+      source-run-id: ${{ inputs.source-run-id }}
+      source-workflow: .github/workflows/ci.yml
+      artifact-name: phoenix-release
+      otp-app: example_app
+      remote-env-prefix: EXAMPLE_APP
+      production-environment-url: https://example.org
+    secrets:
+      production-host: ${{ secrets.PRODUCTION_HOST }}
+      production-ssh-host: ${{ secrets.PRODUCTION_SSH_HOST }}
+      production-ssh-user: ${{ secrets.PRODUCTION_SSH_USER }}
+      production-ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+      production-ssh-known-hosts: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+      production-remote-deploy-script: ${{ secrets.PRODUCTION_REMOTE_DEPLOY_SCRIPT }}
