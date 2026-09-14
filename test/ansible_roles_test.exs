@@ -92,6 +92,37 @@ defmodule CiCdHarness.AnsibleRolesTest do
     assert deploy =~ "public candidate identity did not converge"
   end
 
+  test "application-aware retirement drains, fences, and promotes before stopping the old slot" do
+    defaults = File.read!(Path.join(@roles_root, "phoenix_blue_green/defaults/main.yml"))
+    tasks = File.read!(Path.join(@roles_root, "phoenix_blue_green/tasks/main.yml"))
+
+    deploy =
+      File.read!(Path.join(@roles_root, "phoenix_blue_green/templates/phoenix_deploy.sh.j2"))
+
+    assert defaults =~ "deploy_application_lifecycle_enabled: false"
+    assert defaults =~ "deploy_application_drain_timeout_sec: 120"
+    assert defaults =~ "deploy_application_lifecycle_curl_config:"
+    assert tasks =~ "Install application-aware lifecycle client"
+
+    candidate_offset = byte_offset!(deploy, "if ! verify_public_candidate; then")
+    drain_offset = byte_offset!(deploy, ~s(application_lifecycle_post "${CURRENT_PORT}" drain))
+    safe_offset = byte_offset!(deploy, "application_lifecycle_wait wait-safe")
+    fence_offset = byte_offset!(deploy, ~s(application_lifecycle_post "${CURRENT_PORT}" fence))
+    promotion_offset = byte_offset!(deploy, "application_lifecycle_wait wait-active")
+    commit_offset = byte_offset!(deploy, ~s(echo "${TARGET_COLOR}" > "${CURRENT_COLOR_FILE}"))
+    stop_offset = last_byte_offset!(deploy, ~s(systemctl stop "${CURRENT_SERVICE}" || true))
+
+    assert candidate_offset < drain_offset
+    assert drain_offset < safe_offset
+    assert safe_offset < fence_offset
+    assert fence_offset < promotion_offset
+    assert promotion_offset < commit_offset
+    assert commit_offset < stop_offset
+    assert deploy =~ "application drain remains blocked; restoring"
+    assert deploy =~ ~s(application_lifecycle_post "${CURRENT_PORT}" resume)
+    assert deploy =~ "without stopping it"
+  end
+
   test "ships generic pull-based off-host backup units" do
     operator_root = Path.join(:code.priv_dir(:ci_cd_harness), "operator")
 
@@ -127,6 +158,11 @@ defmodule CiCdHarness.AnsibleRolesTest do
 
   defp byte_offset!(text, pattern) do
     {offset, _length} = :binary.match(text, pattern)
+    offset
+  end
+
+  defp last_byte_offset!(text, pattern) do
+    {offset, _length} = text |> :binary.matches(pattern) |> List.last()
     offset
   end
 end

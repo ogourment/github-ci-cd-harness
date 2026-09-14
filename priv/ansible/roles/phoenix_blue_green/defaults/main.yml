@@ -70,6 +70,17 @@ app_health_watch_state_dir: "/var/lib/{{ app_name }}/health-watch"
 deploy_health_path: "/health"
 deploy_health_timeout_sec: 60
 deploy_drain_sec: 5
+# Optional application-aware retirement. The curl config is a root-readable
+# file containing the authorization header; credentials never enter process
+# arguments. When enabled, the old slot must report safe_to_stop before it is
+# fenced, and the candidate must acquire active ownership before retirement.
+deploy_application_lifecycle_enabled: false
+deploy_application_lifecycle_path: "/api/deployment/lifecycle"
+deploy_application_lifecycle_curl_config: ""
+deploy_application_lifecycle_script: "/usr/local/lib/ci-cd-harness/application_lifecycle"
+deploy_application_drain_timeout_sec: 120
+deploy_application_promotion_timeout_sec: 60
+deploy_application_lifecycle_interval_sec: 2
 # Opt in only after confirming that the previous release remains compatible
 # with the migrated schema and cannot duplicate unsafe scheduled/background
 # work while both colors run.

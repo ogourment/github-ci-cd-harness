@@ -85,7 +85,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.41", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.42", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -157,6 +157,22 @@ current and target colors, and an expiry epoch are available through
 than `CI_CD_DEPLOYMENT_EXPIRES_AT_EPOCH`; terminal events may clear it earlier.
 The contract does not require a shared filesystem marker.
 
+### Application-aware drain and fencing
+
+Consumers whose application owns durable or long-running work can opt into
+`deploy_application_lifecycle_enabled`. The blue/green role then uses the
+configured localhost lifecycle path to drain the old slot, poll until it
+reports `safe_to_stop`, fence its ownership, and wait until the candidate
+reports active ownership. It never substitutes the legacy fixed sleep for an
+application safety decision.
+
+Authentication is supplied through a root-readable curl config file named by
+`deploy_application_lifecycle_curl_config`, so bearer credentials do not enter
+process arguments or deployment output. If the bounded pre-fence wait expires,
+the harness restores the old nginx route, asks the old owner to resume claims,
+leaves it alive, and fails the deployment visibly. After fencing, rollback is
+not guessed: candidate promotion must succeed before the color is committed.
+
 When release distribution is disabled, set `deploy_lifecycle_state_file` to an
 absolute host path readable by the application. The shared deploy service then
 writes the deployment ID and bounded expiry before migrations and removes only
@@ -178,10 +194,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.41/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.41/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.41/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.41/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.42/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.42/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.42/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.42/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable

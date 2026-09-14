@@ -77,6 +77,22 @@
     group: root
     mode: "0755"
 
+- name: Ensure application-aware lifecycle client directory exists
+  ansible.builtin.file:
+    path: "{{ deploy_application_lifecycle_script | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install application-aware lifecycle client
+  ansible.builtin.copy:
+    src: application_lifecycle.sh
+    dest: "{{ deploy_application_lifecycle_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Install rollback script
   ansible.builtin.template:
     src: phoenix_rollback.sh.j2

@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: ogourment/github-ci-cd-harness
-          ref: v0.4.41
+          ref: v0.4.42
           path: .ci-cd-harness
       - uses: actions/download-artifact@v4
         with:

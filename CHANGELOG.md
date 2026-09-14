@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.42
+
+- Add opt-in application-aware blue/green retirement. The shared deploy path
+  drains the old owner, waits for explicit `safe_to_stop`, fences it, verifies
+  candidate promotion, and only then retires the old slot. A blocked pre-fence
+  drain restores the old route and resumes its claims without stopping it.
+
 ## 0.4.41
 
 - Add a production-only Phoenix promotion workflow and copy-ready GitHub CI,

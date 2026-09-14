@@ -38,6 +38,13 @@ HEALTH_PATH="{{ deploy_health_path }}"
 HEALTH_TIMEOUT_SEC={{ deploy_health_timeout_sec }}
 HEALTH_INTERVAL_SEC=2
 DRAIN_SEC={{ deploy_drain_sec }}
+APPLICATION_LIFECYCLE_ENABLED={{ deploy_application_lifecycle_enabled | bool | lower }}
+APPLICATION_LIFECYCLE_PATH="{{ deploy_application_lifecycle_path }}"
+APPLICATION_LIFECYCLE_CURL_CONFIG="{{ deploy_application_lifecycle_curl_config }}"
+APPLICATION_LIFECYCLE_SCRIPT="{{ deploy_application_lifecycle_script }}"
+APPLICATION_DRAIN_TIMEOUT_SEC={{ deploy_application_drain_timeout_sec | int }}
+APPLICATION_PROMOTION_TIMEOUT_SEC={{ deploy_application_promotion_timeout_sec | int }}
+APPLICATION_LIFECYCLE_INTERVAL_SEC={{ deploy_application_lifecycle_interval_sec | int }}
 STANDBY_SEC={{ deploy_standby_sec }}
 STANDBY_END_SCRIPT="{{ deploy_standby_end_script }}"
 STANDBY_UNIT="{{ app_name }}-standby-end"
@@ -213,6 +220,30 @@ dispatch_deployment_lifecycle() {
 cancel_standby_timer() {
   systemctl stop "${STANDBY_UNIT}.timer" "${STANDBY_UNIT}.service" 2>/dev/null || true
   systemctl reset-failed "${STANDBY_UNIT}.timer" "${STANDBY_UNIT}.service" 2>/dev/null || true
+}
+
+application_lifecycle_url() {
+  local port="$1"
+  local action="${2:-}"
+  printf 'http://127.0.0.1:%s%s%s\n' "${port}" "${APPLICATION_LIFECYCLE_PATH}" "${action}"
+}
+
+application_lifecycle_post() {
+  local port="$1"
+  local action="$2"
+  "${APPLICATION_LIFECYCLE_SCRIPT}" post "${APPLICATION_LIFECYCLE_CURL_CONFIG}" \
+    "$(application_lifecycle_url "${port}" "/${action}")" >/dev/null
+}
+
+application_lifecycle_wait() {
+  local expectation="$1"
+  local port="$2"
+  local timeout_sec="$3"
+  "${APPLICATION_LIFECYCLE_SCRIPT}" "${expectation}" \
+    "${APPLICATION_LIFECYCLE_CURL_CONFIG}" \
+    "$(application_lifecycle_url "${port}")" \
+    "${timeout_sec}" \
+    "${APPLICATION_LIFECYCLE_INTERVAL_SEC}" >/dev/null
 }
 
 write_upstream() {
@@ -606,6 +637,47 @@ if ! verify_public_candidate; then
   exit 1
 fi
 
+if [[ "${APPLICATION_LIFECYCLE_ENABLED}" == "true" && "${CURRENT_COLOR}" != "${TARGET_COLOR}" ]] &&
+   systemctl is-active --quiet "${CURRENT_SERVICE}"; then
+  [[ -r "${APPLICATION_LIFECYCLE_CURL_CONFIG}" ]] || {
+    echo "ERROR: application lifecycle curl config is not readable" >&2
+    restore_current_upstream
+    systemctl stop "${TARGET_SERVICE}" || true
+    exit 1
+  }
+
+  echo "==> Draining application work owned by ${CURRENT_COLOR}..."
+  if ! application_lifecycle_post "${CURRENT_PORT}" drain; then
+    echo "ERROR: ${CURRENT_COLOR} rejected application drain; restoring current route" >&2
+    restore_current_upstream
+    systemctl stop "${TARGET_SERVICE}" || true
+    exit 1
+  fi
+
+  if ! application_lifecycle_wait wait-safe "${CURRENT_PORT}" "${APPLICATION_DRAIN_TIMEOUT_SEC}"; then
+    echo "ERROR: application drain remains blocked; restoring ${CURRENT_COLOR} without stopping it" >&2
+    restore_current_upstream
+    application_lifecycle_post "${CURRENT_PORT}" resume ||
+      echo "WARNING: ${CURRENT_COLOR} could not resume automatically" >&2
+    systemctl stop "${TARGET_SERVICE}" || true
+    exit 1
+  fi
+
+  echo "==> Fencing ${CURRENT_COLOR} application ownership..."
+  if ! application_lifecycle_post "${CURRENT_PORT}" fence; then
+    echo "ERROR: application fence failed; restoring ${CURRENT_COLOR}" >&2
+    restore_current_upstream
+    application_lifecycle_post "${CURRENT_PORT}" resume ||
+      echo "WARNING: ${CURRENT_COLOR} could not resume automatically" >&2
+    systemctl stop "${TARGET_SERVICE}" || true
+    exit 1
+  fi
+
+  write_upstream "${TARGET_PORT}"
+  echo "==> Waiting for ${TARGET_COLOR} to acquire active application ownership..."
+  application_lifecycle_wait wait-active "${TARGET_PORT}" "${APPLICATION_PROMOTION_TIMEOUT_SEC}"
+fi
+
 echo "${TARGET_COLOR}" > "${CURRENT_COLOR_FILE}"
 chown "${DEPLOY_USER}:${DEPLOY_USER}" "${CURRENT_COLOR_FILE}"
 
@@ -675,8 +747,12 @@ if [[ "${CURRENT_COLOR}" != "${TARGET_COLOR}" ]] && systemctl is-active --quiet 
       PHOENIX_OPERATION_LOCK_HELD=1 "${STANDBY_END_SCRIPT}"
     fi
   else
-    echo "==> Draining old ${CURRENT_COLOR} for ${DRAIN_SEC}s, then stopping..."
-    sleep "${DRAIN_SEC}"
+    if [[ "${APPLICATION_LIFECYCLE_ENABLED}" == "true" ]]; then
+      echo "==> Application drain and fencing verified; stopping old ${CURRENT_COLOR}..."
+    else
+      echo "==> Draining old ${CURRENT_COLOR} for ${DRAIN_SEC}s, then stopping..."
+      sleep "${DRAIN_SEC}"
+    fi
     write_upstream "${TARGET_PORT}"
     systemctl stop "${CURRENT_SERVICE}" || true
   fi
