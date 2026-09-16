@@ -12,7 +12,7 @@ permissions:
   contents: write
 jobs:
   production:
-    uses: ogourment/github-ci-cd-harness/.github/workflows/phoenix-promote-production.yml@v0.4.42
+    uses: ogourment/github-ci-cd-harness/.github/workflows/phoenix-promote-production.yml@v0.4.43
     with:
       source-run-id: ${{ inputs.source-run-id }}
       source-workflow: .github/workflows/ci.yml

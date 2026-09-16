@@ -8,6 +8,14 @@ server {
     server_name {{ server_name }}{% for alias in server_aliases %} {{ alias }}{% endfor %};
     server_tokens off;
 
+    # Preserve HTTP-01 validation for existing webroot-based certificates.
+    location ^~ /.well-known/acme-challenge/ {
+        root {{ certbot_webroot }};
+        default_type text/plain;
+        try_files $uri =404;
+        limit_except GET HEAD { deny all; }
+    }
+
     {% if ssl_enabled %}
     location / {
         return 301 https://{{ server_name }}$request_uri;

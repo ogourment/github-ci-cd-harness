@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.43
+
+- Keep HTTP-01 challenges available before HTTPS redirects and application proxies, including after adopting an existing webroot-based certificate. The web role creates the challenge directory, enables the Certbot timer, and installs a lineage-specific nginx validation/reload hook after successful renewal. Set certbot_webroot to the path used by existing renewal settings (default /var/www/letsencrypt). Reapply the web role to affected hosts; upgrading the pin alone does not repair installed nginx configuration. Existing nginx-plugin renewal remains supported.
+- Add a real nginx regression covering canonical and alias domains, initial HTTP and HTTPS redirects, and missing challenge tokens.
+
 ## 0.4.42
 
 - Add opt-in application-aware blue/green retirement. The shared deploy path

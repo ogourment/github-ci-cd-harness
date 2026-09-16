@@ -38,3 +38,7 @@ nginx_https_extra_locations: ""
 # together; the URL prefix starts with a slash and omits the trailing slash.
 nginx_uploads_dir: ""
 nginx_uploads_url_prefix: ""
+
+# Match the webroot used by any existing Certbot renewal configuration.
+certbot_webroot: "/var/www/letsencrypt"
+certbot_timer_unit: "certbot.timer"

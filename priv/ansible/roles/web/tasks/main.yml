@@ -20,6 +20,36 @@
     pkg: "{{ web_packages }}"
     state: present
 
+- name: Ensure the HTTP-01 challenge directory exists
+  ansible.builtin.file:
+    path: "{{ certbot_webroot }}/.well-known/acme-challenge"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure Certbot deploy hook directory exists
+  ansible.builtin.file:
+    path: /etc/letsencrypt/renewal-hooks/deploy
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Reload nginx after this certificate is renewed
+  ansible.builtin.template:
+    src: renew-nginx.sh.j2
+    dest: "/etc/letsencrypt/renewal-hooks/deploy/{{ nginx_site_name }}-reload-nginx"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Enable scheduled certificate renewal
+  ansible.builtin.systemd_service:
+    name: "{{ certbot_timer_unit }}"
+    enabled: true
+    state: started
+
 - name: Ensure nginx is enabled and running
   ansible.builtin.service:
     name: nginx

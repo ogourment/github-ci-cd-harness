@@ -85,7 +85,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.42", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.43", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -194,10 +194,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.42/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.42/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.42/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.42/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.43/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.43/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.43/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.43/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable
@@ -246,3 +246,18 @@ Forgejo `olivierg/ci-cd-harness` is the canonical repository. GitHub
 the reusable workflows under `.github/workflows`. Develop and release only
 from the canonical repository; mirror commits and tags must resolve to the
 same objects.
+
+
+## Existing TLS certificates
+
+The web role preserves HTTP-01 challenges at /.well-known/acme-challenge/
+before the HTTPS redirect or application proxy. For an existing webroot-based
+certificate, set certbot_webroot to the path in its renewal configuration
+(default /var/www/letsencrypt). Other custom paths are not inferred.
+The role enables certbot.timer and reloads nginx after successful renewal of
+its certificate, validating configuration first.
+
+After upgrading from 0.4.42 or earlier, review an Ansible web-role dry run and
+reapply that role on the consumer host. Then run a certificate-specific
+certbot renewal dry run and verify the served expiration date after actual
+renewal. Merely updating a Git pin does not change a host.

@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+# Certbot calls deploy hooks only after successful renewal.
+if [ "${RENEWED_LINEAGE:-}" = "/etc/letsencrypt/live/{{ server_name }}" ]; then
+    nginx -t
+    systemctl reload nginx
+fi

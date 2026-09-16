@@ -35,6 +35,10 @@ jobs:
           python-version: "3.14"
       - name: Install contract dependencies
         run: pip install ansible-core==2.21.2
+      - name: Install nginx for certificate renewal regression
+        run: sudo apt-get update && sudo apt-get install -y nginx
+      - name: Verify HTTP-01 challenge routing
+        run: python3 -m unittest discover -s test -p web_renewal_test.py -v
       - name: Run Elixir contracts
         run: mix test
       - name: Run GitHub workflow contracts
