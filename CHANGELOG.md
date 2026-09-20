@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.44 - unreleased
+## 0.4.44 - 2026-09-20
 
 - Carry the installed acceptance harness artifact reader with evidence and use
   it for the GitLab gate without starting Mix. Older harnesses retain their
