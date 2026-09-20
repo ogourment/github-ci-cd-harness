@@ -1,6 +1,6 @@
 variables:
   CI_CD_HARNESS_URL: "https://git.agile-u.com/olivierg/ci-cd-harness.git"
-  CI_CD_HARNESS_REF: "v0.4.43"
+  CI_CD_HARNESS_REF: "v0.4.44"
   # Publishing a report to GitLab Pages creates a Pages deployment. Keep that
   # separate from acceptance verification, so consumers opt in deliberately.
   CI_CD_ENABLE_ACCEPTANCE_REPORT_PAGES: "false"
@@ -116,7 +116,11 @@ acceptance_gate:
       set -euo pipefail
       : "${ACCEPTANCE_EVIDENCE_DIR:=tmp/atdd}"
       : "${ACCEPTANCE_MIX_ENV:=test}"
-      MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.gate "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md"
+      if [ -f "$ACCEPTANCE_EVIDENCE_DIR/acceptance_gate.py" ]; then
+        python3 "$ACCEPTANCE_EVIDENCE_DIR/acceptance_gate.py" "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md"
+      else
+        MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.gate "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md"
+      fi
   # The notifier belongs to the gate, rather than a standalone `when: always`
   # job. A failed deploy can skip evidence; if that deploy is retried, GitLab
   # schedules this gate once evidence exists, so a notification is never

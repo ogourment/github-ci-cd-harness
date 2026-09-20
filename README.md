@@ -85,7 +85,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.43", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.44", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -194,10 +194,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.43/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.43/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.43/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.43/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.44/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.44/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.44/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.44/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable
@@ -261,3 +261,13 @@ After upgrading from 0.4.42 or earlier, review an Ansible web-role dry run and
 reapply that role on the consumer host. Then run a certificate-specific
 certbot renewal dry run and verify the served expiration date after actual
 renewal. Merely updating a Git pin does not change a host.
+
+### Artifact-only acceptance gate
+
+AcceptanceHarness 0.11 supplies a Python standard-library gate reader. The evidence
+job retains it as `tmp/atdd/acceptance_gate.py`; the gate job uses that exact reader
+when present and otherwise uses the legacy Mix task. Preserve this file when
+overriding artifact paths. Upgraded consumers can remove PostgreSQL and Mix
+dependency setup from the gate job, but must provide Python 3 and preserve its
+evidence dependency and production gating. The evidence-producing job still runs
+its selected scenarios once. This optimization does not relax acceptance outcomes.

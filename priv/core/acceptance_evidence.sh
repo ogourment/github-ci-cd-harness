@@ -66,8 +66,18 @@ if [ "$ACCEPTANCE_SITE_EXIT_CODE" -ne 0 ]; then
   exit "$ACCEPTANCE_SITE_EXIT_CODE"
 fi
 
+# Carry the installed harness's artifact reader with its results. Older harnesses
+# continue through Mix. Never turn a failing portable gate into a fallback pass.
+acceptance_portable_gate="${ACCEPTANCE_PORTABLE_GATE_SOURCE:-deps/acceptance_harness/priv/preview/acceptance_gate.py}"
+if [ -f "$acceptance_portable_gate" ] && command -v python3 >/dev/null 2>&1; then
+  cp "$acceptance_portable_gate" "$ACCEPTANCE_EVIDENCE_DIR/acceptance_gate.py"
+  acceptance_gate_command=(python3 "$ACCEPTANCE_EVIDENCE_DIR/acceptance_gate.py")
+else
+  acceptance_gate_command=(env MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.gate)
+fi
+
 set +e
-MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.gate "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" \
+"${acceptance_gate_command[@]}" "$ACCEPTANCE_EVIDENCE_DIR/status.env" "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" \
   > "$ACCEPTANCE_EVIDENCE_DIR/gate_check.txt" 2>&1
 ACCEPTANCE_GATE_EXIT_CODE="$?"
 set -e
@@ -183,4 +193,3 @@ if [ -n "${ACCEPTANCE_LIVE_EVIDENCE_COMMAND:-}" ] && [ "$acceptance_live_evidenc
   echo "Configured live acceptance evidence was not published: ${acceptance_live_evidence_status}" >&2
   exit 1
 fi
-

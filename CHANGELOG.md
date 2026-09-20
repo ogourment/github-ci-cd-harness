@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.44 - unreleased
+
+- Carry the installed acceptance harness artifact reader with evidence and use
+  it for the GitLab gate without starting Mix. Older harnesses retain their
+  existing Mix gate; portable gate failures never fall back to another reader.
+
 ## 0.4.43
 
 - Keep HTTP-01 challenges available before HTTPS redirects and application proxies, including after adopting an existing webroot-based certificate. The web role creates the challenge directory, enables the Certbot timer, and installs a lineage-specific nginx validation/reload hook after successful renewal. Set certbot_webroot to the path used by existing renewal settings (default /var/www/letsencrypt). Reapply the web role to affected hosts; upgrading the pin alone does not repair installed nginx configuration. Existing nginx-plugin renewal remains supported.
