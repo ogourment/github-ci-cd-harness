@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: ogourment/github-ci-cd-harness
-          ref: v0.4.43
+          ref: v0.4.45
           path: .ci-cd-harness
       - uses: actions/download-artifact@v4
         with:
@@ -109,6 +109,15 @@ jobs:
           CI_PIPELINE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ inputs.source-run-id }}
           GITLAB_USER_LOGIN: ${{ github.actor }}
         run: .ci-cd-harness/priv/core/deploy_release_fast.sh production
+      - name: Retain production deployment report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-deployment-report
+          retention-days: 14
+          path: |
+            _build/deployment/production/commits.json
+            _build/deployment/production/timing.env
       - name: Tag only the successfully verified production release
         env:
           CI_CD_RELEASE_VERSION_COMMAND: cat _build/VERSION

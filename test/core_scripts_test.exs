@@ -11,6 +11,7 @@ defmodule CiCdHarness.CoreScriptsTest do
 
   @scripts ~w(
     acceptance_evidence.sh
+    ci_metadata.sh
     acceptance_fast_timing.sh
     atdd_generate_thumbnails.sh
     atdd_remote_copy.sh
@@ -92,7 +93,8 @@ defmodule CiCdHarness.CoreScriptsTest do
 
     [deployed_sha, _first_sha, second_sha, current_sha] = commits
     app = "notify_contract_#{System.unique_integer([:positive])}"
-    previous_health = "/tmp/#{app}_prod_previous_health.json"
+    previous_health = Path.join(tmp, "_build/deployment/prod/previous_health.json")
+    File.mkdir_p!(Path.dirname(previous_health))
 
     File.write!(
       previous_health,
@@ -116,6 +118,7 @@ defmodule CiCdHarness.CoreScriptsTest do
         cd: tmp,
         env: [
           {"CI_CD_OTP_APP", app},
+          {"CI_CD_PREVIOUS_HEALTH_FILE", previous_health},
           {"CI_CD_DEPLOY_TARGET", "prod"},
           {"CI_COMMIT_SHA", current_sha},
           {"CI_COMMIT_BEFORE_SHA", second_sha},
@@ -137,6 +140,18 @@ defmodule CiCdHarness.CoreScriptsTest do
         System.cmd("bash", ["-n", Path.join(@core, script)], stderr_to_stdout: true)
 
       assert status == 0, "#{script} does not parse: #{output}"
+    end
+  end
+
+  test "deployment ranges and Forgejo metadata satisfy the portable reporting contracts" do
+    for filename <- ["deployment_commits_test.py", "forgejo_metadata_test.py"] do
+      {output, status} =
+        System.cmd("python3", ["-m", "unittest", "discover", "-s", "test", "-p", filename],
+          env: [{"PYTHONDONTWRITEBYTECODE", "1"}],
+          stderr_to_stdout: true
+        )
+
+      assert status == 0, output
     end
   end
 

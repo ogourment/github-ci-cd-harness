@@ -85,7 +85,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.44", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.45", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -108,6 +108,65 @@ bootstrap script in their own repository and run it before `deps.get`;
 everything after dependency resolution comes from this package.
 
 ## Delivery scripts
+
+### Deployment reporting contract
+
+Serialize deployments per repository and target so the observed previous release
+remains the deployment boundary. Shared GitLab jobs use a target resource group;
+GitHub jobs use non-cancelling target concurrency groups. Forgejo consumer jobs
+must keep their equivalent target serialization. These controls are not FIFO
+queues and do not coordinate another repository deploying to the same target.
+
+`deploy_release_fast.sh` and `notify_deployment.sh` use one shared deployment
+report. The change boundary is the commit observed on the target environment
+before deployment, not the previous push or the most recent release tag.
+Staging and production each have their own boundary. Repeating the same commit
+reports zero commits; a rollback labels the removed commits; divergent history
+or missing provenance reports `Commits: unavailable` with a reason.
+
+The collector resolves the health response's full `git_sha`/`commit_sha`, or the
+commit embedded in the standard release ID. `CI_CD_PREVIOUS_DEPLOYED_SHA` is an
+explicit override for callers that obtain the target identity another way.
+Shallow checkouts are hydrated from their existing `origin` with a bounded Git
+fetch. An unreachable boundary is never replaced by the latest commit or an
+arbitrary date window. Set `CI_CD_COMMIT_HISTORY_FETCH=false` to disable fetches;
+incomplete history then remains visibly unavailable.
+
+The report in `_build/deployment/<target>/commits.json` retains every commit's
+full SHA, subject and complete message, including markers in commit bodies.
+It records the target, baseline, candidate, range direction and execution run.
+Deployment metadata and notifications consume that same report. Telegram gets
+the exact total and an escaped preview capped by a UTF-16 character budget,
+with an explicit omitted count. It does not cap the collected commit list.
+Keep the report and adjacent `timing.env` as CI artifacts, including on failure.
+The shared GitLab/GitHub workflows do this; Forgejo consumers add the same two
+paths to their deployment-job artifact upload.
+
+Actual deployment duration comes from the shared deployer's entry/exit clock,
+not the job start. Job wait is creation-to-start only when both provider
+timestamps exist; dependency wait, deployment time and runner queue are not
+interchangeable. Pipeline age uses the executing run's creation timestamp.
+Unknown timings remain unknown.
+
+The shared core automatically loads the Forgejo metadata adapter. Supply the
+temporary job-scoped `FORGEJO_TOKEN: ${{ forgejo.token }}` in the workflow/job
+environment. No personal token or consumer-local API script is needed.
+The adapter validates repository, SHA, run, job and UI URL, disables redirects,
+and retains only normalized metadata. The API run ID, UI run number and job ID
+are separate identities. Forgejo's current job API does not expose job-created
+or runner-queue timing, so those values are not invented. GitLab retains its
+native fields; GitHub retains its existing workflow identity.
+
+`CI_CD_EXECUTION_RUN_ID`, `CI_CD_EXECUTION_RUN_URL` and
+`CI_CD_EXECUTION_CREATED_AT` describe the workflow executing this job. An
+explicit, different `CI_PIPELINE_ID` remains the staged artifact's source run
+during promotion; normalizing a promotion must not change deployed provenance.
+Reports validate execution identity when read by a later notification step.
+
+Infrastructure repositories pin the shared Ansible roles; application workflows
+pin the delivery scripts. Updating an infrastructure submodule alone does not
+update an application's CI scripts. This reporting change uses the existing
+remote `GIT_MESSAGES` contract and does not require a production reprovision.
 
 `priv/core/` carries the delivery layer: blue/green deploy, health identity
 verification, SemVer tag preflight and publication, acceptance evidence, remote
@@ -194,10 +253,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.44/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.44/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.44/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.44/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.45/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.45/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.45/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.45/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable

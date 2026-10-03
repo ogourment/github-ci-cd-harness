@@ -15,6 +15,7 @@
 set +e
 set +u
 set +o pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/ci_metadata.sh"
 
 : "${CI_CD_APP_NAME:=${CI_PROJECT_NAME:-project}}"
 : "${CI_CD_DEPLOY_TARGET:=unknown}"
@@ -33,53 +34,15 @@ fi
 release_id="$(cat _build/RELEASE_ID 2>/dev/null || echo unknown)"
 app_version="$(cat _build/VERSION 2>/dev/null || echo unknown)"
 actor="${GITLAB_USER_LOGIN:-${GITLAB_USER_NAME:-unknown}}"
-pipeline_id="${CI_PIPELINE_ID:-unknown}"
+pipeline_id="${CI_CD_EXECUTION_RUN_ID:-${GITHUB_RUN_ID:-${CI_PIPELINE_ID:-unknown}}}"
 job_id="${CI_JOB_ID:-unknown}"
 
-previous_deployed_sha() {
-  local previous_health_file previous_release_id release_without_pipeline short_sha
-
-  if [ -n "${CI_CD_PREVIOUS_DEPLOYED_SHA:-}" ] &&
-    git cat-file -e "${CI_CD_PREVIOUS_DEPLOYED_SHA}^{commit}" 2>/dev/null; then
-    git rev-parse "${CI_CD_PREVIOUS_DEPLOYED_SHA}^{commit}" 2>/dev/null
-    return
-  fi
-
-  previous_health_file="/tmp/${CI_CD_OTP_APP:-app}_${CI_CD_DEPLOY_TARGET}_previous_health.json"
-  [ -s "$previous_health_file" ] || return
-
-  previous_release_id="$(sed -nE 's/.*"release_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$previous_health_file" | tail -n 1)"
-  release_without_pipeline="${previous_release_id%-*}"
-  short_sha="${release_without_pipeline##*-}"
-
-  if [[ "$short_sha" =~ ^[0-9a-fA-F]{7,40}$ ]] &&
-    git cat-file -e "${short_sha}^{commit}" 2>/dev/null; then
-    git rev-parse "${short_sha}^{commit}" 2>/dev/null
-  fi
-}
-
-commit_boundary="$(previous_deployed_sha || true)"
-if [ -z "$commit_boundary" ] &&
-  [ -n "${CI_COMMIT_BEFORE_SHA:-}" ] &&
-  [ "${CI_COMMIT_BEFORE_SHA}" != "0000000000000000000000000000000000000000" ] &&
-  git cat-file -e "${CI_COMMIT_BEFORE_SHA}^{commit}" 2>/dev/null; then
-  commit_boundary="${CI_COMMIT_BEFORE_SHA}"
+# Use the same immutable range prepared by deployment; never infer a push range.
+commit_report="$(python3 "$(dirname "${BASH_SOURCE[0]}")/deployment_commits.py" render "$CI_CD_DEPLOY_TARGET" 2>/dev/null)"
+if [ -z "$commit_report" ]; then
+  commit_report="Commits: unavailable — deployment report could not be read"
 fi
-
-if [ -n "$commit_boundary" ]; then
-  ci_deploy_commit_messages="$(git log --no-merges --pretty=format:'%h %s' "${commit_boundary}..${CI_COMMIT_SHA:-HEAD}" 2>/dev/null || true)"
-else
-  ci_deploy_commit_messages=""
-fi
-
-if [ -z "${ci_deploy_commit_messages:-}" ]; then
-  ci_deploy_commit_messages="$(git log -1 --no-merges --pretty=format:'%h %s' "${CI_COMMIT_SHA:-HEAD}" 2>/dev/null || true)"
-fi
-
-commit_count="$(printf '%s\n' "${ci_deploy_commit_messages}" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
-if [ "$commit_count" = "" ]; then
-  commit_count=0
-fi
+ci_deploy_commit_messages="$(python3 "$(dirname "${BASH_SOURCE[0]}")/deployment_commits.py" messages "$CI_CD_DEPLOY_TARGET" 2>/dev/null || true)"
 
 seconds_from_timestamp() {
   date -u -d "$1" +%s 2>/dev/null || true
@@ -108,8 +71,14 @@ job_started_at="${CI_JOB_STARTED_AT:-}"
 if [ -n "$job_started_at" ]; then
   job_start_epoch="$(seconds_from_timestamp "$job_started_at")"
 fi
-if [ -n "${job_start_epoch:-}" ]; then
-  deploy_seconds="$(($(date -u +%s) - job_start_epoch))"
+timing_file="_build/deployment/${CI_CD_DEPLOY_TARGET}/timing.env"
+if [ -f "$timing_file" ]; then
+  deploy_start="$(sed -nE 's/^CI_CD_DEPLOY_STARTED_AT_EPOCH=([0-9]+)$/\1/p' "$timing_file")"
+  deploy_finish="$(sed -nE 's/^CI_CD_DEPLOY_FINISHED_AT_EPOCH=([0-9]+)$/\1/p' "$timing_file")"
+  if [[ "$deploy_start" =~ ^[0-9]+$ && "$deploy_finish" =~ ^[0-9]+$ ]] &&
+    [ "$deploy_finish" -ge "$deploy_start" ]; then
+    deploy_seconds="$((deploy_finish - deploy_start))"
+  fi
 fi
 
 if [ -n "$job_created_at" ] && [ -n "$job_started_at" ]; then
@@ -119,23 +88,22 @@ if [ -n "$job_created_at" ] && [ -n "$job_started_at" ]; then
   fi
 fi
 
-if [ -n "${CI_PIPELINE_CREATED_AT:-}" ]; then
-  pipeline_created_epoch="$(seconds_from_timestamp "${CI_PIPELINE_CREATED_AT}")"
+pipeline_created_at="${CI_CD_EXECUTION_CREATED_AT:-${CI_PIPELINE_CREATED_AT:-}}"
+if [ -n "$pipeline_created_at" ]; then
+  pipeline_created_epoch="$(seconds_from_timestamp "$pipeline_created_at")"
   if [ -n "${pipeline_created_epoch:-}" ]; then
     total_seconds="$(($(date -u +%s) - pipeline_created_epoch))"
   fi
 fi
 
-if [ "$wait_seconds" = "unknown" ] && [ -n "${job_start_epoch:-}" ] && [ -n "${pipeline_created_epoch:-}" ]; then
-  wait_seconds="$((job_start_epoch - pipeline_created_epoch))"
-fi
+# Pipeline-to-job start includes dependency waits; it is not runner queue time.
 
 html_escape() {
   printf '%s' "$1" | sed -e 's/&/\\&amp;/g' -e 's/</\\&lt;/g' -e 's/>/\\&gt;/g'
 }
 
 active_color=""
-health_file="/tmp/${CI_CD_OTP_APP:-app}_${CI_CD_DEPLOY_TARGET}_health.json"
+health_file="_build/deployment/${CI_CD_DEPLOY_TARGET}/health.json"
 if [ -s "$health_file" ]; then
   active_color="$(sed -nE 's/.*"color":"([^"]+)".*/\1/p' "$health_file" | tail -n 1)"
 fi
@@ -157,20 +125,10 @@ fi
 message+=$'\n'"Actor: <code>${actor}</code>"
 message+=$'\n'"Timing: deploy=<code>$(duration_label "${deploy_seconds}")</code> wait=<code>$(duration_label "${wait_seconds}")</code> total=<code>$(duration_label "${total_seconds}")</code>"
 
-if [ "${commit_count}" -gt 0 ]; then
-  message+=$'\n'"Commits: ${commit_count}"
-  printed=0
-  while IFS= read -r commit_line; do
-    [ -z "${commit_line}" ] && continue
-    commit_hash="${commit_line%% *}"
-    commit_subject="${commit_line#* }"
-    if [ "$commit_hash" != "$commit_line" ] && [[ "$commit_hash" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
-      message+=$'\n'"- <code>$(html_escape "${commit_hash}")</code> $(html_escape "${commit_subject}")"
-    else
-      message+=$'\n'"- $(html_escape "${commit_line}")"
-    fi
-    printed=$((printed + 1))
-  done <<< "${ci_deploy_commit_messages}"
+message+=$'\n'"${commit_report}"
+report_url="${CI_CD_EXECUTION_RUN_URL:-${CI_PIPELINE_URL:-}}"
+if [ -n "$report_url" ]; then
+  message+=$'\n'"Deployment report: <a href=\"$(html_escape "$report_url")\">pipeline artifacts</a>"
 fi
 
 if [ -n "$CI_CD_ALERT_ADAPTER" ]; then

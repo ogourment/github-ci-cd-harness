@@ -9,6 +9,7 @@
 # Evidence is produced even when scenarios fail: the gate is evaluated
 # separately, so a failing suite still publishes what it observed.
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/ci_metadata.sh"
 : "${ACCEPTANCE_APP_NAME:=${CI_PROJECT_NAME:-project}}"
 : "${ACCEPTANCE_TEST_COMMAND:=mix test.atdd}"
 : "${ACCEPTANCE_MIX_ENV:=test}"

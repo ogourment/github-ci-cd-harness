@@ -46,7 +46,11 @@ runs = [s.get('run', '') for s in steps]
 def index(fragment):
     return next(i for i, command in enumerate(runs) if fragment in command)
 assert index('verify_promotion.py') < index('release_tag.sh preflight') < index('deploy_release_fast.sh production') < index('release_tag.sh publish')
-stage = yaml.safe_load((root / '.github/workflows/phoenix-delivery.yml').read_text())['jobs']['deploy_staging']['steps']
+delivery = yaml.safe_load((root / '.github/workflows/phoenix-delivery.yml').read_text())
+assert delivery['jobs']['deploy_staging']['concurrency'] == {'group': '${{ github.repository }}-staging', 'cancel-in-progress': False}
+gitlab = yaml.safe_load((root / 'templates/gitlab/cd.yml').read_text())
+assert gitlab['.ci_cd_deploy_template']['resource_group'] == 'deployment-$CI_CD_DEPLOY_TARGET'
+stage = delivery['jobs']['deploy_staging']['steps']
 assert next(i for i, s in enumerate(stage) if 'staging_release_smoke.sh' in s.get('run', '')) < next(i for i, s in enumerate(stage) if 'staging_receipt.py' in s.get('run', ''))
 PY
 

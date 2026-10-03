@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/ci_metadata.sh"
 
 target="${1:?target required}"
 
@@ -17,16 +18,33 @@ target="${1:?target required}"
 
 release_id="$(cat _build/RELEASE_ID)"
 version="$(cat _build/VERSION)"
-previous_health_file="/tmp/${CI_CD_OTP_APP}_${target}_previous_health.json"
+case "$target" in
+  *[!a-zA-Z0-9_-]*|'') echo "Invalid deployment target" >&2; exit 2 ;;
+esac
+report_dir="_build/deployment/${target}"
+mkdir -p "$report_dir"
+previous_health_file="${report_dir}/previous_health.json"
+export CI_CD_PREVIOUS_HEALTH_FILE="$previous_health_file"
+# Report files are job-workspace scoped, never shared /tmp state from another run.
+rm -f "$report_dir/commits.json" "$report_dir/timing.env"
+deploy_started_epoch="$(date -u +%s)"
+record_deploy_timing() {
+  local status="$?"
+  printf 'CI_CD_DEPLOY_STARTED_AT_EPOCH=%s\nCI_CD_DEPLOY_FINISHED_AT_EPOCH=%s\nCI_CD_DEPLOY_EXIT_CODE=%s\n' \
+    "$deploy_started_epoch" "$(date -u +%s)" "$status" > "$report_dir/timing.env"
+}
+trap record_deploy_timing EXIT
 
 # The push boundary is not the deployment boundary: production can be
 # deployed manually after several pushes. Preserve the identity currently
 # serving traffic so the notification can report the complete release range.
 rm -f "$previous_health_file"
 if [ -n "${CI_CD_HEALTH_URL:-}" ]; then
-  curl -fsSL "$CI_CD_HEALTH_URL" >"$previous_health_file" 2>/dev/null ||
+  curl -fsSL --connect-timeout 5 --max-time 15 "$CI_CD_HEALTH_URL" >"$previous_health_file" 2>/dev/null ||
     rm -f "$previous_health_file"
 fi
+
+python3 "$(dirname "${BASH_SOURCE[0]}")/deployment_commits.py" collect "$target" || true
 
 remote_env_prefix="${CI_CD_REMOTE_ENV_PREFIX:-$(printf '%s' "$CI_CD_OTP_APP" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9_' '_')}"
 
@@ -153,11 +171,6 @@ job_wait_seconds() {
     duration_between "$created_at" "$started_at"
     return
   fi
-
-  pipeline_created_at="$(pipeline_timestamp || true)"
-  if [ -n "$pipeline_created_at" ]; then
-    duration_between "$pipeline_created_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  fi
 }
 
 pipeline_created_epoch() {
@@ -166,19 +179,7 @@ pipeline_created_epoch() {
 }
 
 commit_messages() {
-  before_sha="${CI_COMMIT_BEFORE_SHA:-}"
-
-  if [ -n "$before_sha" ] &&
-    [ "$before_sha" != "0000000000000000000000000000000000000000" ] &&
-    git cat-file -e "${before_sha}^{commit}" 2>/dev/null; then
-    messages="$(git log --format="%h %s" "${before_sha}..${CI_COMMIT_SHA:-HEAD}")"
-    if [ -n "$messages" ]; then
-      printf '%s\n' "$messages"
-      return
-    fi
-  fi
-
-  git log -1 --format="%h %s" "${CI_COMMIT_SHA:-HEAD}"
+  python3 "$(dirname "${BASH_SOURCE[0]}")/deployment_commits.py" messages "$target"
 }
 
 remote_env_assignment() {
@@ -249,8 +250,8 @@ case "$CI_CD_RELEASE_ARTIFACT_KIND" in
 esac
 
 if [ -n "${CI_CD_HEALTH_URL:-}" ]; then
-  health_file="/tmp/${CI_CD_OTP_APP}_${target}_health.json"
-  retry curl -fsSL "$CI_CD_HEALTH_URL" | tee "$health_file"
+  health_file="${report_dir}/health.json"
+  retry curl -fsSL --connect-timeout 5 --max-time 15 "$CI_CD_HEALTH_URL" | tee "$health_file"
   "$(dirname "${BASH_SOURCE[0]}")/verify_health_identity.sh" \
     "$health_file" "$version" "$release_id" "${CI_PIPELINE_ID:-unknown}"
 fi

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.45 - 2026-10-02
+
+- Use the observed target deployment as the commit boundary, hydrate shallow
+  history with bounded fetches, and retain one complete structured report for
+  deployment metadata and notifications. Report redeploys, rollbacks and unknown
+  ranges explicitly; never replace unavailable history with one recent commit.
+- Bound Telegram previews without truncating the collected commit list. Retain
+  reports in shared GitLab/GitHub jobs; Forgejo consumers upload the same report
+  paths from their deploy jobs.
+- Share Forgejo workflow-token identity/timing normalization across deployment,
+  notifications and acceptance. Resolve real job IDs and UI run URLs while
+  preserving staged artifact provenance during promotion. Measure actual deploy
+  duration separately; missing job-wait and runner-queue data remain unknown.
+
 ## 0.4.44 - 2026-09-20
 
 - Carry the installed acceptance harness artifact reader with evidence and use
