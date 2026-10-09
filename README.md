@@ -85,7 +85,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.45", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.46", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -253,10 +253,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.45/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.45/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.45/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.45/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.46/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.46/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.46/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.46/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable
@@ -330,3 +330,22 @@ overriding artifact paths. Upgraded consumers can remove PostgreSQL and Mix
 dependency setup from the gate job, but must provide Python 3 and preserve its
 evidence dependency and production gating. The evidence-producing job still runs
 its selected scenarios once. This optimization does not relax acceptance outcomes.
+
+## Watchdog public-failure handling (0.4.46)
+
+After valid direct app readiness, a failing public endpoint records its reason
+(including curl exit code for transport failures) in the systemd journal and
+structured failure history. It retains the healthy service instead of restarting
+or failing over. One healthy probe does not erase the action cooldown. Public
+incidents require 60 seconds of observed health to close; unconfirmed notification
+sends remain retryable. Direct app failure still permits cooldown-limited recovery.
+
+Consumers can apply just `phoenix_blue_green` tasks_from `watchdog_script`, using
+their normal inventory and role defaults. This installs only the managed script;
+it does not provision other roles or restart applications. Review `--check --diff`
+before applying. A dry run or template pin alone does not prove live behaviour.
+
+Run the isolated regressions with `python3 test/watchdog_recovery_test.py` in an
+environment containing Jinja2 and jq. All network, service, proxy and notification
+operations are faked. Public outage, notification retry, stable recovery, direct
+app recovery and standby failover are checked against the actual managed template.

@@ -36,9 +36,11 @@ jobs:
       - name: Install contract dependencies
         run: pip install ansible-core==2.21.2
       - name: Install nginx for certificate renewal regression
-        run: sudo apt-get update && sudo apt-get install -y nginx
+        run: sudo apt-get update && sudo apt-get install -y nginx jq
       - name: Verify HTTP-01 challenge routing
         run: python3 -m unittest discover -s test -p web_renewal_test.py -v
+      - name: Run watchdog recovery regressions
+        run: python3 test/watchdog_recovery_test.py
       - name: Run Elixir contracts
         run: mix test
       - name: Run GitHub workflow contracts

@@ -137,13 +137,7 @@
   when: app_manage_failure_alert_unit | bool
 
 - name: Install recurring health watch script
-  ansible.builtin.template:
-    src: phoenix_health_watch.sh.j2
-    dest: "{{ app_health_watch_script }}"
-    owner: root
-    group: root
-    mode: "0755"
-  when: app_health_watch_interval_sec | int > 0
+  ansible.builtin.import_tasks: watchdog_script.yml
 
 - name: Install recurring health watch service
   ansible.builtin.template:

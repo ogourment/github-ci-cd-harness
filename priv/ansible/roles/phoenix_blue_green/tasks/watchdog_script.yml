@@ -1,0 +1,11 @@
+---
+# Focused update: no app restart, timer changes or other provisioning.
+- name: Install recurring health watch script
+  ansible.builtin.template:
+    src: phoenix_health_watch.sh.j2
+    dest: "{{ app_health_watch_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when: app_health_watch_interval_sec | int > 0
+

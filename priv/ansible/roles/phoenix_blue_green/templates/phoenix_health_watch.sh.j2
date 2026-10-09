@@ -58,9 +58,13 @@ CURRENT_SERVICE="${APP}@${CURRENT_COLOR}.service"
 STANDBY_SERVICE="${APP}@${STANDBY_COLOR}.service"
 FAILURE_COUNT_FILE="${STATE_DIR}/consecutive-failures"
 LAST_ACTION_FILE="${STATE_DIR}/last-action"
+PUBLIC_INCIDENT_FILE="${STATE_DIR}/public-incident"
+PUBLIC_RECOVERY_FILE="${STATE_DIR}/public-recovery"
+PUBLIC_NOTIFIED_FILE="${STATE_DIR}/public-notified"
 
 probe_committed_color() {
   probe_failure=""
+  probe_failure_kind="application"
   readiness_body="$(mktemp)"
   if ! readiness_status="$(
     curl --silent --show-error \
@@ -84,8 +88,9 @@ probe_committed_color() {
     return 1
   fi
 
+  probe_failure_kind="public"
   public_readiness_body="$(mktemp)"
-  if ! public_readiness_status="$(
+  if public_readiness_status="$(
     curl --silent --show-error \
       --connect-timeout 2 \
       --max-time 3 \
@@ -93,7 +98,9 @@ probe_committed_color() {
       --write-out '%{http_code}' \
       "${PUBLIC_BASE_URL%/}${HEALTH_PATH}" 2>/dev/null
   )"; then
-    public_readiness_status="transport"
+    :
+  else
+    public_readiness_status="transport curl_exit=$?"
   fi
   if [[ "${public_readiness_status}" != 2* ]]; then
     probe_failure="public readiness ${public_readiness_status}"
@@ -109,7 +116,7 @@ probe_committed_color() {
 
   smoke_headers="$(mktemp)"
   smoke_body="$(mktemp)"
-  if ! smoke_status="$(
+  if smoke_status="$(
     curl --silent --show-error --location \
       --connect-timeout "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
       --max-time "${PUBLIC_SMOKE_TIMEOUT_SEC}" \
@@ -118,7 +125,9 @@ probe_committed_color() {
       --write-out '%{http_code}' \
       "${PUBLIC_BASE_URL%/}${PUBLIC_SMOKE_PATH}" 2>/dev/null
   )"; then
-    smoke_status="transport"
+    :
+  else
+    smoke_status="transport curl_exit=$?"
   fi
   smoke_content_type="$(
     grep -i '^Content-Type:' "${smoke_headers}" 2>/dev/null |
@@ -140,10 +149,21 @@ probe_committed_color() {
 }
 
 if probe_committed_color; then
-  rm -f "${FAILURE_COUNT_FILE}" "${LAST_ACTION_FILE}"
+  rm -f "${FAILURE_COUNT_FILE}"
+  # One good probe must not reset cooldown or close a flapping issue.
+  if [[ -f "${PUBLIC_INCIDENT_FILE}" ]]; then
+    healthy_now="$(date -u +%s)"
+    healthy_since="$(cat "${PUBLIC_RECOVERY_FILE}" 2>/dev/null || echo 0)"
+    if [[ ! "${healthy_since}" =~ ^[0-9]+$ ]] || (( healthy_since == 0 )); then
+      printf '%s\n' "${healthy_now}" > "${PUBLIC_RECOVERY_FILE}"
+    elif (( healthy_now - healthy_since >= 60 )); then
+      rm -f "${PUBLIC_INCIDENT_FILE}" "${PUBLIC_RECOVERY_FILE}" "${PUBLIC_NOTIFIED_FILE}"
+    fi
+  fi
   exit 0
 fi
 
+rm -f "${PUBLIC_RECOVERY_FILE}"
 failure_count="$(cat "${FAILURE_COUNT_FILE}" 2>/dev/null || echo 0)"
 [[ "${failure_count}" =~ ^[0-9]+$ ]] || failure_count=0
 failure_count=$((failure_count + 1))
@@ -152,15 +172,6 @@ echo "Health watch failure ${failure_count}/${FAILURE_THRESHOLD}: ${probe_failur
 if (( failure_count < FAILURE_THRESHOLD )); then
   exit 0
 fi
-
-now="$(date -u +%s)"
-last_action="$(cat "${LAST_ACTION_FILE}" 2>/dev/null || echo 0)"
-if [[ "${last_action}" =~ ^[0-9]+$ ]] &&
-  (( now - last_action < ACTION_COOLDOWN_SEC )); then
-  echo "Health watch action suppressed by ${ACTION_COOLDOWN_SEC}s cooldown."
-  exit 0
-fi
-printf '%s\n' "${now}" > "${LAST_ACTION_FILE}"
 
 write_live_only_upstream() {
   local live_port="$1"
@@ -224,13 +235,42 @@ notify_action() {
   local destination_color="$2"
   local message
   message="$(
-    printf '🚨 <b>[%s] %s health recovery</b>\n' "${DEPLOY_ENV}" "${APP}"
+    printf '🚨 <b>[%s] %s health incident</b>\n' "${DEPLOY_ENV}" "${APP}"
     printf 'Reason: <code>%s</code>\n' "$(html_escape "${probe_failure}")"
     printf 'Action: <code>%s</code>\n' "$(html_escape "${action}")"
     printf 'Color: <code>%s</code>' "$(html_escape "${destination_color}")"
   )"
   TELEGRAM_SILENT=false "${NOTIFY_SCRIPT}" "${message}"
 }
+
+now="$(date -u +%s)"
+if [[ "${probe_failure_kind}" == "public" ]]; then
+  # Local readiness proved the active app healthy. Restarting it cannot
+  # repair the public resolver/network/proxy and risks interrupting users.
+  if [[ -f "${PUBLIC_NOTIFIED_FILE}" ]]; then
+    echo "Public endpoint issue persists; healthy active service retained."
+    exit 0
+  fi
+  if [[ ! -f "${PUBLIC_INCIDENT_FILE}" ]]; then
+    printf '%s\n' "${now}" > "${PUBLIC_INCIDENT_FILE}"
+    append_event "public endpoint failed; healthy active service retained" "${CURRENT_COLOR}"
+  fi
+  if notify_action "public endpoint failed; healthy active service retained" "${CURRENT_COLOR}"; then
+    printf '%s\n' "${now}" > "${PUBLIC_NOTIFIED_FILE}"
+  else
+    echo "Public incident notification unconfirmed; retry on a later probe."
+  fi
+  exit 0
+fi
+
+now="$(date -u +%s)"
+last_action="$(cat "${LAST_ACTION_FILE}" 2>/dev/null || echo 0)"
+if [[ "${last_action}" =~ ^[0-9]+$ ]] &&
+  (( now - last_action < ACTION_COOLDOWN_SEC )); then
+  echo "Health watch action suppressed by ${ACTION_COOLDOWN_SEC}s cooldown."
+  exit 0
+fi
+printf '%s\n' "${now}" > "${LAST_ACTION_FILE}"
 
 if ! standby_status="$(
   curl --silent --show-error \

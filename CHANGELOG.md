@@ -1,3 +1,11 @@
+## 0.4.46
+
+- Keep a directly healthy application running during public endpoint failures.
+- Record public curl transport exit codes in watchdog journal/history, retain
+  cooldown across healthy probes, and require stable public recovery before
+  another public-incident notification. Retry unconfirmed notifications.
+- Provide a script-only watchdog role task for focused existing-host updates.
+
 # Changelog
 
 ## 0.4.45 - 2026-10-02
