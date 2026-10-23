@@ -1,3 +1,9 @@
+## 0.4.48
+
+- Add bounded metadata-only acceptance evidence retention without generating
+  historical previews; retain all manifests and protect the newest two runs.
+  Reject unsafe paths, identity mismatches and oversized protected allocations.
+
 ## 0.4.47
 
 - Add independent database, app, disk and backup probes with durable A55ist alert

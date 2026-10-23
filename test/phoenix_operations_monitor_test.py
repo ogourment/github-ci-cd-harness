@@ -54,4 +54,21 @@ class OperationsTest(unittest.TestCase):
             (root/'unexpected').mkdir()
             with self.assertRaises(ValueError):pruner.plan([root],slots)
 
+
+class EvidenceCapacityTest(unittest.TestCase):
+    def test_metadata_retained_and_newest_two_payloads_protected(self):
+        trim=module('phoenix-evidence-trim')
+        with tempfile.TemporaryDirectory() as tmp:
+            for i in range(5):
+                r=Path(tmp)/f'run-{i}';r.mkdir();(r/'screenshots').mkdir()
+                (r/'screenshots/x.png').write_bytes(b'x'*10)
+                (r/'evidence.json').write_text(__import__('json').dumps({'run':{'id':r.name},'generated_at':f'2026-10-{10+i}T00:00:00Z'}))
+            retained,evict=trim.plan(tmp,20)
+            self.assertEqual(retained,20);self.assertEqual(len(evict),3)
+            self.assertTrue(all((r/'evidence.json').exists() for r,_,_ in evict))
+            for r,files,_ in evict:
+                self.assertNotIn(r.name,['run-3','run-4'])
+            (Path(tmp)/'run-0/screenshots/unsafe').symlink_to('/etc/passwd')
+            with self.assertRaises(ValueError):trim.plan(tmp,20)
+
 if __name__=='__main__':unittest.main()
