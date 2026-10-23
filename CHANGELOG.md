@@ -1,3 +1,9 @@
+## 0.4.50
+
+- Allow at most five seconds of positive probe-clock skew while rejecting stale
+  and genuinely future observations. Avoid false transport incidents from normal
+  NTP differences between the VPS and independent observer.
+
 ## 0.4.49
 
 - Observe systemd application failure records and error priorities, including

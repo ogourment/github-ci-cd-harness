@@ -38,7 +38,7 @@ def atomic(path, value):
 def conditions(config, sample, now=None):
     now = now or utcnow()
     observed = datetime.fromisoformat(sample['observed_at'].replace('Z', '+00:00'))
-    if observed.tzinfo is None or not 0 <= (now-observed).total_seconds() <= 120:
+    if observed.tzinfo is None or not -5 <= (now-observed).total_seconds() <= 120:
         raise ValueError('stale or future probe')
     if sample['host'] != config['host']:
         raise ValueError('wrong probe host')

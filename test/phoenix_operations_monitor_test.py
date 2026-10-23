@@ -27,6 +27,12 @@ class OperationsTest(unittest.TestCase):
             s=self.sample();s[field]=value
             with self.assertRaises(ValueError):monitor.conditions({'host':'synthetic'},s)
 
+    def test_bounded_ntp_skew_is_accepted_but_future_samples_are_rejected(self):
+        s=self.sample();s['observed_at']=(datetime.now(timezone.utc)+timedelta(seconds=2)).isoformat()
+        self.assertIsNone(monitor.conditions({'host':'synthetic'},s)['database'])
+        s['observed_at']=(datetime.now(timezone.utc)+timedelta(seconds=10)).isoformat()
+        with self.assertRaises(ValueError):monitor.conditions({'host':'synthetic'},s)
+
     def test_app_error_and_backup_are_independent(self):
         s=self.sample();s['application_errors']=1;s['backup']=False
         r=monitor.conditions({'host':'synthetic'},s)
