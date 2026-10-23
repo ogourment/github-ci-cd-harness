@@ -1,3 +1,8 @@
+## 0.4.49
+
+- Observe systemd application failure records and error priorities, including
+  process crashes recovered by automatic restart between readiness samples.
+
 ## 0.4.48
 
 - Add bounded metadata-only acceptance evidence retention without generating

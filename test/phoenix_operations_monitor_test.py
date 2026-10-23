@@ -32,6 +32,13 @@ class OperationsTest(unittest.TestCase):
         r=monitor.conditions({'host':'synthetic'},s)
         self.assertEqual(r['application_errors'],'error');self.assertEqual(r['backup'],'critical');self.assertIsNone(r['application'])
 
+    def test_systemd_crash_is_seen_even_after_automatic_restart(self):
+        probe=module('phoenix-operations-probe')
+        self.assertTrue(probe.error_message({'MESSAGE':'Main process exited, code=killed, status=9/KILL','PRIORITY':'6'}))
+        self.assertTrue(probe.error_message({'MESSAGE':'unit failed','PRIORITY':'3'}))
+        self.assertTrue(probe.error_message({'MESSAGE':'Sent 500 in 3ms','PRIORITY':'6'}))
+        self.assertFalse(probe.error_message({'MESSAGE':'Stopped cleanly','PRIORITY':'6'}))
+
     def test_failed_maintenance_is_its_own_optional_condition(self):
         s=self.sample();s['maintenance']=False
         self.assertEqual(monitor.conditions({'host':'synthetic'},s)['maintenance'],'critical')

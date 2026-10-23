@@ -17,6 +17,13 @@ def run(argv, timeout=5):
         return None
 
 
+def error_message(row):
+    message=row.get('MESSAGE','')
+    priority=str(row.get('PRIORITY','6'))
+    return priority in ('0','1','2','3') or bool(re.search(
+        r'\[(?:error|critical|alert|emergency)\]|Sent 5\d\d\b|Failed with result|Main process exited',message))
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config',required=True)
@@ -46,8 +53,7 @@ def main():
     if logs is not None and logs.returncode == 0:
         for row in logs.stdout.splitlines():
             try:
-                message=json.loads(row).get('MESSAGE','')
-                if re.search(r'\[(?:error|critical|alert|emergency)\]|Sent 5\d\d\b',message):
+                if error_message(json.loads(row)):
                     errors+=1
             except ValueError:
                 pass
