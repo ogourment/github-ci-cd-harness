@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   contracts:
-    runs-on: ubuntu-latest
+    # PostgreSQL 16 integration must use the matching Ubuntu 24.04 client.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16-alpine
