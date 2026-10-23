@@ -53,10 +53,18 @@ def main():
                 pass
     else:
         raise RuntimeError('application log probe unavailable')
-    print(json.dumps(dict(host=config['host'],observed_at=datetime.now(timezone.utc).isoformat(),
+    result=dict(host=config['host'],observed_at=datetime.now(timezone.utc).isoformat(),
         disk={'free':disk.f_bavail*disk.f_frsize,'total':disk.f_blocks*disk.f_frsize},
         database=database is not None and database.returncode == 0 and database.stdout.strip() == '1',
-        application=application,backup=backup,application_errors=errors)))
+        application=application,backup=backup,application_errors=errors)
+    if config.get("maintenance_success_file"):
+        check=run(["systemctl","show",config["maintenance_unit"],"--property=Result","--value"])
+        try:
+            age=datetime.now(timezone.utc).timestamp()-Path(config["maintenance_success_file"]).stat().st_mtime
+            result["maintenance"]=check is not None and check.returncode == 0 and check.stdout.strip() == "success" and 0 <= age <= config["backup_max_age_seconds"]
+        except OSError:
+            result["maintenance"]=False
+    print(json.dumps(result))
 
 
 if __name__=='__main__':main()

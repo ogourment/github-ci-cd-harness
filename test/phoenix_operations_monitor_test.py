@@ -32,6 +32,10 @@ class OperationsTest(unittest.TestCase):
         r=monitor.conditions({'host':'synthetic'},s)
         self.assertEqual(r['application_errors'],'error');self.assertEqual(r['backup'],'critical');self.assertIsNone(r['application'])
 
+    def test_failed_maintenance_is_its_own_optional_condition(self):
+        s=self.sample();s['maintenance']=False
+        self.assertEqual(monitor.conditions({'host':'synthetic'},s)['maintenance'],'critical')
+
     def test_recovery_contract_and_severity_escalation_keys(self):
         c=dict(app='test',environment='test',host='synthetic',observer='test')
         a=monitor.event(c,'disk','warning','episode');b=monitor.event(c,'disk','critical','episode')

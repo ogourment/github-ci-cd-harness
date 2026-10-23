@@ -37,3 +37,11 @@ slot targets and the newest two releases, rejects unexpected entries and symlink
 roots. The caller must hold all relevant deployment operation locks. Backups,
 files and acceptance evidence are outside its scope. Evidence uses the existing
 AcceptanceHarness.EvidenceRetention library, retaining database run metadata.
+
+`phoenix-evidence-trim.py --root ROOT --max-bytes BYTES` plans a bounded local
+screenshot allocation. Add `--apply` after inspecting the plan. It protects the
+newest two captures, retains every manifest and database run record, and trims
+older screenshot/thumbnail payloads without generating previews that may then
+expire. Use this before the normal thumbnail-retention pass for a small host.
+The probe can also verify `maintenance_unit` plus a `maintenance_success_file`;
+failed or stale retention is a separate alert condition.

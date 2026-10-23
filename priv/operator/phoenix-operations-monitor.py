@@ -47,7 +47,7 @@ def conditions(config, sample, now=None):
         raise ValueError('invalid disk probe')
     result = {'disk': ('critical' if disk['free']*100 < disk['total']*10 else 'warning')
               if disk['free']*100 < disk['total']*20 else None}
-    for name in ('database', 'application', 'backup'):
+    for name in ('database', 'application', 'backup') + (('maintenance',) if 'maintenance' in sample else ()):
         if type(sample[name]) is not bool:
             raise ValueError('unknown probe is not health: '+name)
         result[name] = None if sample[name] else 'critical'
