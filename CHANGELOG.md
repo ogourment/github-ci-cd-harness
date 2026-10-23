@@ -1,3 +1,11 @@
+## 0.4.47
+
+- Add independent database, app, disk and backup probes with durable A55ist alert
+  submission and bounded private state. Preserve central Telegram routing and
+  event/provider receipts; transport failure never means service recovery.
+- Add dry-run release retention across explicit shared host roots, protecting
+  both blue/green slot targets and the newest two releases.
+
 ## 0.4.46
 
 - Keep a directly healthy application running during public endpoint failures.
