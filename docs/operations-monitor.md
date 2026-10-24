@@ -45,3 +45,11 @@ older screenshot/thumbnail payloads without generating previews that may then
 expire. Use this before the normal thumbnail-retention pass for a small host.
 The probe can also verify `maintenance_unit` plus a `maintenance_success_file`;
 failed or stale retention is a separate alert condition.
+
+Operations alerts carry an episode correlation key, a direct operator-page URL
+and allowlisted observations (HTTP status, app-vs-direct database result, elapsed
+time and recent service startup). Recovery retains the initial failure snapshot.
+A55ist can link recovery to the same notified incident and send one resolution.
+The log error check excludes only an informational readiness 503 with a matching
+GET /health request ID; ordinary HTTP 5xx, exceptions and crashes remain counted.
+No raw journal text is exported. Older events lack these diagnostic observations.

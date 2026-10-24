@@ -58,7 +58,40 @@ def conditions(config, sample, now=None):
     return result
 
 
-def event(config, name, severity, episode, recovered=False):
+def observation(sample):
+    """Explicit allowlist: raw journals, credentials and exception text stay local."""
+    if not sample:
+        return {}
+    result = {key: sample[key] for key in ('observed_at', 'database', 'application',
+        'backup', 'maintenance', 'application_errors', 'disk') if key in sample}
+    app = sample.get('application_observation', {})
+    result['application_observation'] = {key: app[key] for key in
+        ('result', 'http_status', 'database', 'elapsed_ms', 'recent_service_start') if key in app}
+    return result
+
+
+def description(name, sample):
+    titles = {'application': 'Application readiness check failed',
+        'application_errors': 'Application error log entries detected',
+        'database': 'Direct PostgreSQL check failed', 'disk': 'Free disk space is low',
+        'backup': 'Backup is failed or older than its allowed age',
+        'maintenance': 'Retention maintenance is failed or stale',
+        'observer_transport': 'Observer could not obtain a valid host sample'}
+    detail = titles.get(name, name+' check failed')
+    if name == 'application' and sample:
+        app = sample.get('application_observation', {})
+        if app.get('http_status'):
+            detail += f"; /health returned HTTP {app['http_status']}"
+        detail += f"; app database: {app.get('database', 'unknown')}"
+        detail += '; direct PostgreSQL: '+('healthy' if sample.get('database') else 'failed')
+        if app.get('recent_service_start'):
+            detail += '; service startup observed in the last 75 seconds'
+    if name == 'application_errors' and sample:
+        detail += f"; {sample['application_errors']} entries in the last 75 seconds (readiness status excluded)"
+    return detail
+
+
+def event(config, name, severity, episode, recovered=False, sample=None, failure=None):
     status = 'recovered' if recovered else 'firing'
     fingerprint = ':'.join([config['app'], config['environment'], config['host'], name])
     return dict(contract_version='alert-event.v1', app=config['app'],
@@ -66,8 +99,12 @@ def event(config, name, severity, episode, recovered=False):
         category='operations', reason_code=name, severity='info' if recovered else severity,
         status=status, occurred_at=utcnow().isoformat(), occurred_timezone='UTC',
         fingerprint=fingerprint, idempotency_key=fingerprint+':'+episode+':'+status+':'+str(severity),
-        message=("REHEARSAL (production unchanged): " if config.get("rehearsal") else "")+f"{config['app']} / {config['environment']}: {name} {'recovered' if recovered else 'failed'}",
-        metadata={'observer':config['observer'], 'episode':episode}, evidence={})
+        message=("REHEARSAL (production unchanged): " if config.get("rehearsal") else "")+
+            (f"{name.replace('_', ' ').capitalize()} recovered" if recovered else description(name, sample)),
+        metadata={'observer':config['observer'], 'episode':episode,
+            'correlation_key':fingerprint+':'+episode,
+            'alerts_url':config.get('a55ist_url', '').rstrip('/')+'/ops/alerts'},
+        evidence={'observation':observation(sample), 'initial_failure':failure or {}})
 
 
 def deliver(config, payload):
@@ -102,12 +139,15 @@ def main():
             state['receipts']=(state.get('receipts',[])+[{'event_id':receipt,'key':payload['idempotency_key']}])[-100:]
             state.pop('pending')
             atomic(state_path,state)
+        sample=None
         try:
             raw=Path(args.sample).read_text() if args.sample else subprocess.run(
                 config['probe_argv'],capture_output=True,text=True,check=True,timeout=30).stdout
-            findings=conditions(config,json.loads(raw))
+            sample=json.loads(raw)
+            findings=conditions(config,sample)
             findings['observer_transport']=None
         except (ValueError, KeyError, subprocess.SubprocessError, OSError):
+            sample=None
             findings={'observer_transport':'critical'}
         for name,severity in findings.items():
             previous=state.get('conditions',{}).get(name,{})
@@ -119,8 +159,10 @@ def main():
             if severity == previous.get('severity'):
                 continue
             episode=previous.get('episode') if was_firing else utcnow().isoformat()
-            payload=event(config,name,severity,episode,recovered=not severity)
-            state.setdefault('conditions',{})[name]={'severity':severity,'episode':episode}
+            failure=previous.get('failure_observation') if was_firing else observation(sample)
+            payload=event(config,name,severity,episode,recovered=not severity, sample=sample, failure=failure)
+            state.setdefault('conditions',{})[name]={'severity':severity,'episode':episode,
+                'failure_observation':failure}
             state['pending']=payload
             atomic(state_path,state)
             receipt=deliver(config,payload)

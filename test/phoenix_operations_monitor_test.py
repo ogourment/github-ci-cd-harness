@@ -45,6 +45,31 @@ class OperationsTest(unittest.TestCase):
         self.assertTrue(probe.error_message({'MESSAGE':'Sent 500 in 3ms','PRIORITY':'6'}))
         self.assertFalse(probe.error_message({'MESSAGE':'Stopped cleanly','PRIORITY':'6'}))
 
+    def test_readiness_status_is_not_a_second_error_but_real_errors_remain(self):
+        probe=module('phoenix-operations-probe')
+        rows=[{'MESSAGE':'request_id=health [info] GET /health'},
+              {'MESSAGE':'request_id=health [info] Sent 503 in 5ms'}]
+        self.assertEqual(probe.application_error_count(rows),0)
+        rows += [{'MESSAGE':'request_id=other [info] Sent 503 in 5ms'},
+                 {'MESSAGE':'request_id=health [error] actual exception'},
+                 {'MESSAGE':'Main process exited, code=killed'}]
+        self.assertEqual(probe.application_error_count(rows),3)
+
+    def test_events_explain_observation_correlate_recovery_and_exclude_raw_logs(self):
+        c=dict(app='test',environment='test',host='synthetic',observer='test',a55ist_url='https://operator.example')
+        s=self.sample();s['application']=False
+        s['application_observation']=dict(result='http_error',http_status=503,database='unavailable',elapsed_ms=5,raw='private')
+        s['journal']='private'
+        firing=monitor.event(c,'application','critical','episode',sample=s)
+        recovery=monitor.event(c,'application',None,'episode',True,s,monitor.observation(s))
+        self.assertIn('HTTP 503',firing['message'])
+        self.assertIn('direct PostgreSQL: healthy',firing['message'])
+        self.assertEqual(firing['metadata']['correlation_key'],recovery['metadata']['correlation_key'])
+        self.assertNotEqual(firing['idempotency_key'],recovery['idempotency_key'])
+        self.assertEqual(firing['metadata']['alerts_url'],'https://operator.example/ops/alerts')
+        self.assertNotIn('private',str(firing))
+        self.assertEqual(recovery['evidence']['initial_failure']['application_observation']['http_status'],503)
+
     def test_failed_maintenance_is_its_own_optional_condition(self):
         s=self.sample();s['maintenance']=False
         self.assertEqual(monitor.conditions({'host':'synthetic'},s)['maintenance'],'critical')
