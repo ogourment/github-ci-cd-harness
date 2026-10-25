@@ -1,8 +1,13 @@
 import importlib.util
+import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timezone, timedelta
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 ROOT=Path(__file__).resolve().parents[1]
 def module(name):
@@ -112,5 +117,167 @@ class EvidenceCapacityTest(unittest.TestCase):
                 self.assertNotIn(r.name,['run-3','run-4'])
             (Path(tmp)/'run-0/screenshots/unsafe').symlink_to('/etc/passwd')
             with self.assertRaises(ValueError):trim.plan(tmp,20)
+
+
+class TransportDebounceTest(unittest.TestCase):
+    def test_both_thresholds_are_required_and_first_observation_is_retained(self):
+        start=datetime.now(timezone.utc)
+        state={}
+        self.assertEqual(monitor.transport_failure({},state,start),{})
+        self.assertEqual(monitor.transport_failure({},state,start+timedelta(seconds=61)),{})
+        self.assertEqual(monitor.transport_failure({},state,start+timedelta(seconds=62)),
+                         {'observer_transport':'critical'})
+        self.assertEqual(state['transport_failure']['first_observed_at'],start.isoformat())
+        state={}
+        for offset in (0,10,20):
+            self.assertEqual(monitor.transport_failure({},state,start+timedelta(seconds=offset)),{})
+        self.assertEqual(monitor.transport_failure({},state,start+timedelta(seconds=60)),
+                         {'observer_transport':'critical'})
+        state={}
+        for offset in (0,30):
+            self.assertEqual(monitor.transport_failure({},state,start+timedelta(seconds=offset)),{})
+        self.assertEqual(monitor.transport_failure({},state,start+timedelta(seconds=60)),
+                         {'observer_transport':'critical'})  # Exactly the third 30-second tick.
+
+    def test_configurable_thresholds_are_validated_without_coercion(self):
+        self.assertEqual(monitor.transport_thresholds({}),(3,60))
+        self.assertEqual(monitor.transport_thresholds({'transport_failure_samples':2,
+                         'transport_failure_seconds':30}),(2,30))
+        for key,values in [('transport_failure_samples',[True,0,101,'3',1.5]),
+                           ('transport_failure_seconds',[False,-1,3601,'60',float('inf')])]:
+            for value in values:
+                with self.subTest(key=key,value=value), self.assertRaises(ValueError):
+                    monitor.transport_thresholds({key:value})
+
+
+class MonitorProcessTest(unittest.TestCase):
+    """Real CLI invocations, synthetic probe processes and a local receipt receiver."""
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root=Path(self.tmp.name)
+        self.events=[]
+        self.fail_delivery=False
+        events=self.events
+        owner=self
+        class Receiver(BaseHTTPRequestHandler):
+            def do_POST(self):
+                events.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+                if owner.fail_delivery:
+                    owner.fail_delivery=False
+                    self.send_response(503);self.end_headers();return
+                self.send_response(202);self.end_headers()
+                self.wfile.write(json.dumps({'event':{'id':str(len(events))}}).encode())
+            def log_message(self,*args):
+                pass
+        self.server=HTTPServer(('127.0.0.1',0),Receiver)
+        self.thread=threading.Thread(target=self.server.serve_forever,daemon=True)
+        self.thread.start()
+        self.addCleanup(self.close_server)
+        self.token=self.root/'token';self.token.write_text('synthetic-test-token');self.token.chmod(0o600)
+        self.sample=self.root/'sample.json'
+        self.probe=self.root/'probe.py'
+        self.probe.write_text('import pathlib,sys\n'
+            'raw=pathlib.Path(sys.argv[1]).read_text()\n'
+            'if raw == "exit":\n'
+            '    print("SECRET stderr must stay private", file=sys.stderr)\n'
+            '    sys.exit(7)\n'
+            'print(raw)\n')
+        self.state=self.root/'state.json'
+        self.config=dict(app='synthetic',environment='test',host='synthetic',observer='test',
+            probe_argv=[sys.executable,str(self.probe),str(self.sample)],
+            token_file=str(self.token),state_file=str(self.state),
+            a55ist_url=f'http://127.0.0.1:{self.server.server_port}')
+
+    def close_server(self):
+        self.server.shutdown();self.thread.join();self.server.server_close()
+
+    def run_monitor(self, sample, success=True):
+        self.sample.write_text(json.dumps(sample) if isinstance(sample,dict) else sample)
+        config=self.root/'config.json';config.write_text(json.dumps(self.config))
+        result=subprocess.run([sys.executable,str(ROOT/'priv/operator/phoenix-operations-monitor.py'),
+            '--config',str(config)],capture_output=True,text=True,timeout=10)
+        self.assertNotIn('SECRET',result.stdout+result.stderr)
+        self.assertNotIn('synthetic-test-token',result.stdout+result.stderr)
+        if not success:
+            self.assertNotEqual(result.returncode,0)
+            return result
+        self.assertEqual(result.returncode,0,result.stderr)
+        return json.loads(result.stdout.splitlines()[-1])
+
+    def valid(self, application=True):
+        return dict(host='synthetic',observed_at=datetime.now(timezone.utc).isoformat(),
+            disk={'free':30,'total':100},database=True,application=application,
+            backup=True,application_errors=0)
+
+    def age_pending(self, seconds=61):
+        state=json.loads(self.state.read_text())
+        first=(datetime.now(timezone.utc)-timedelta(seconds=seconds)).isoformat()
+        state['transport_failure']['first_observed_at']=first
+        self.state.write_text(json.dumps(state))
+        return first
+
+    def test_single_failure_recovers_silently_and_resets_consecutive_count(self):
+        self.assertEqual(self.run_monitor('exit')['transport_error'],'probe_exit')
+        self.run_monitor(self.valid())
+        self.assertEqual(self.events,[])
+        self.assertNotIn('transport_failure',json.loads(self.state.read_text()))
+        self.run_monitor('not JSON SECRET')
+        self.assertEqual(json.loads(self.state.read_text())['transport_failure']['count'],1)
+        self.assertEqual(self.events,[])
+
+    def test_sustained_failure_alerts_once_then_recovers_same_episode(self):
+        self.run_monitor('exit')
+        first=self.age_pending()
+        self.run_monitor('exit')
+        self.assertEqual(self.events,[])  # Duration alone is insufficient.
+        self.run_monitor('exit')
+        self.assertEqual(len(self.events),1)
+        firing=self.events[0]
+        self.assertEqual(firing['reason_code'],'observer_transport')
+        self.assertEqual(firing['status'],'firing')
+        self.assertEqual(firing['metadata']['episode'],first)
+        self.run_monitor('exit')
+        self.assertEqual(len(self.events),1)
+        self.run_monitor(self.valid())
+        self.assertEqual(len(self.events),2)
+        self.assertEqual(self.events[1]['status'],'recovered')
+        self.assertEqual(self.events[1]['metadata']['correlation_key'],firing['metadata']['correlation_key'])
+        self.assertNotIn('transport_failure',json.loads(self.state.read_text()))
+
+    def test_unknown_sample_never_clears_application_failure(self):
+        self.run_monitor(self.valid(application=False))
+        self.run_monitor('exit')
+        self.run_monitor('[]')
+        malformed=self.valid();malformed['observed_at']=123
+        self.assertEqual(self.run_monitor(malformed)['transport_error'],'invalid_sample')
+        self.assertEqual([(e['reason_code'],e['status']) for e in self.events],
+                         [('application','firing')])
+        self.assertEqual(json.loads(self.state.read_text())['conditions']['application']['severity'],'critical')
+        self.run_monitor(self.valid())
+        self.assertEqual([(e['reason_code'],e['status']) for e in self.events],
+                         [('application','firing'),('application','recovered')])
+
+    def test_existing_alert_recovers_without_new_pending_counter(self):
+        self.state.write_text(json.dumps({'conditions':{'observer_transport':
+            {'severity':'critical','episode':'existing-episode','failure_observation':{}}}}))
+        self.run_monitor(self.valid())
+        self.assertEqual(len(self.events),1)
+        self.assertEqual(self.events[0]['status'],'recovered')
+        self.assertEqual(self.events[0]['metadata']['episode'],'existing-episode')
+
+    def test_failed_delivery_retries_identical_payload_before_recovery(self):
+        self.config.update(transport_failure_samples=1,transport_failure_seconds=0)
+        self.fail_delivery=True
+        self.run_monitor('exit',success=False)
+        pending=json.loads(self.state.read_text())['pending']
+        self.assertEqual(pending,self.events[0])
+        self.run_monitor(self.valid())
+        self.assertEqual(len(self.events),3)
+        self.assertEqual(self.events[0],self.events[1])
+        self.assertEqual(self.events[2]['status'],'recovered')
+        state=json.loads(self.state.read_text())
+        self.assertNotIn('pending',state)
+        self.assertEqual(len(state['receipts']),2)
 
 if __name__=='__main__':unittest.main()

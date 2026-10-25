@@ -121,12 +121,47 @@ def deliver(config, payload):
         return receipt['event']['id']
 
 
+def transport_thresholds(config):
+    samples = config.get('transport_failure_samples', 3)
+    seconds = config.get('transport_failure_seconds', 60)
+    if type(samples) is not int or not 1 <= samples <= 100:
+        raise ValueError('transport_failure_samples must be an integer from 1 to 100')
+    if type(seconds) is not int or not 0 <= seconds <= 3600:
+        raise ValueError('transport_failure_seconds must be an integer from 0 to 3600')
+    return samples, seconds
+
+
+def transport_failure(config, state, now):
+    """Unknown samples leave application conditions untouched, including failures."""
+    minimum_samples, minimum_seconds = transport_thresholds(config)
+    pending = state.setdefault('transport_failure', {'count': 0, 'first_observed_at': now.isoformat()})
+    pending['count'] += 1
+    first = datetime.fromisoformat(pending['first_observed_at'])
+    already_firing = state.get('conditions', {}).get('observer_transport', {}).get('severity')
+    if already_firing or (pending['count'] >= minimum_samples and
+            (now-first).total_seconds() >= minimum_seconds):
+        return {'observer_transport': 'critical'}
+    return {}
+
+
+def transport_error_category(error):
+    # Exception messages, subprocess stderr and probe output may contain secrets.
+    if isinstance(error, subprocess.TimeoutExpired):
+        return 'probe_timeout'
+    if isinstance(error, subprocess.CalledProcessError):
+        return 'probe_exit'
+    if isinstance(error, OSError):
+        return 'probe_io'
+    return 'invalid_sample'
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True)
     parser.add_argument('--sample', help='use a labelled rehearsal JSON sample')
     args=parser.parse_args()
     config=json.loads(Path(args.config).read_text())
+    transport_thresholds(config)
     state_path=Path(config['state_file'])
     state_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with open(str(state_path)+'.lock', 'a') as lock:
@@ -140,25 +175,30 @@ def main():
             state.pop('pending')
             atomic(state_path,state)
         sample=None
+        transport_error=None
         try:
             raw=Path(args.sample).read_text() if args.sample else subprocess.run(
                 config['probe_argv'],capture_output=True,text=True,check=True,timeout=30).stdout
             sample=json.loads(raw)
             findings=conditions(config,sample)
             findings['observer_transport']=None
-        except (ValueError, KeyError, subprocess.SubprocessError, OSError):
+            state.pop('transport_failure', None)
+        except (ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError, OSError) as error:
             sample=None
-            findings={'observer_transport':'critical'}
+            transport_error=transport_error_category(error)
+            findings=transport_failure(config,state,utcnow())
         for name,severity in findings.items():
             previous=state.get('conditions',{}).get(name,{})
             was_firing=bool(previous.get('severity'))
             if not severity and not was_firing:
                 continue
-            # Every firing transition and severity increase is immediate. A55ist
+            # Valid host failures and severity increases are immediate. A55ist
             # retains incident/delivery receipts and handles reminder coalescing.
             if severity == previous.get('severity'):
                 continue
             episode=previous.get('episode') if was_firing else utcnow().isoformat()
+            if name == 'observer_transport' and not was_firing:
+                episode=state['transport_failure']['first_observed_at']
             failure=previous.get('failure_observation') if was_firing else observation(sample)
             payload=event(config,name,severity,episode,recovered=not severity, sample=sample, failure=failure)
             state.setdefault('conditions',{})[name]={'severity':severity,'episode':episode,
@@ -172,7 +212,11 @@ def main():
             print(json.dumps({'condition':name,'status':payload['status'],'event_id':receipt}),flush=True)
         state['checked_at']=utcnow().isoformat()
         atomic(state_path,state)
-        print(json.dumps({'checked_at':state['checked_at'],'conditions':findings}),flush=True)
+        diagnostic={'checked_at':state['checked_at'],'conditions':findings}
+        if transport_error:
+            diagnostic['transport_error']=transport_error
+            diagnostic['transport_failure']=state['transport_failure']
+        print(json.dumps(diagnostic),flush=True)
 
 
 if __name__=='__main__':

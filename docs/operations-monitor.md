@@ -20,10 +20,27 @@ Keep configuration, state and credentials private. The receiver must have an exa
 application/environment route or explicitly retained legacy global routing.
 The monitor persists a pending event before submission and retries the identical
 idempotency key after interruption. Only delivery to A55ist clears the pending
-entry. Firing/recovery transitions and severity increases are immediate; each
+entry. Valid host failure/recovery transitions and severity increases are immediate; each
 accepted event ID is retained for receiver reconciliation. Disk warning begins
 below20% free; critical begins below10%. Failed/stale backups, unavailable database,
 application health and application error observations are separate conditions.
+
+Only observer transport failures are debounced: by default, at least three
+consecutive invalid samples **and** 60 elapsed seconds from the first failure
+are required before an `observer_transport` event fires. The private state file
+persists the count and first observation across timer invocations. A valid sample
+resets this pending sequence; an unalerted blip produces no recovery event.
+An already alerted transport condition recovers normally on a valid sample.
+Unknown samples never clear existing host failures. The transport episode retains
+the first failed observation time, including the debounce interval.
+
+Optional configuration `transport_failure_samples` accepts an integer 1–100
+(default 3); `transport_failure_seconds` accepts an integer 0–3600 (default 60).
+Both thresholds must be met; booleans, strings and fractional values are rejected
+before probing or delivery. A failed-probe diagnostic logs only `probe_timeout`,
+`probe_exit`, `probe_io` or `invalid_sample`, plus the safe pending count/timestamp;
+it never logs subprocess stderr, probe output or exception messages. Debounce
+does not delay application, database, disk, backup or maintenance failures.
 
 The probe JSON uses `observed_at`, `host`, `disk: {free,total}`, boolean `database`,
 `application`, `backup`, and integer `application_errors`. `--sample` is a labelled
