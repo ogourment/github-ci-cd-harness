@@ -171,7 +171,7 @@ class MonitorProcessTest(unittest.TestCase):
             def log_message(self,*args):
                 pass
         self.server=HTTPServer(('127.0.0.1',0),Receiver)
-        self.thread=threading.Thread(target=self.server.serve_forever,daemon=True)
+        self.thread=threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.01),daemon=True)
         self.thread.start()
         self.addCleanup(self.close_server)
         self.token=self.root/'token';self.token.write_text('synthetic-test-token');self.token.chmod(0o600)
@@ -265,6 +265,73 @@ class MonitorProcessTest(unittest.TestCase):
         self.assertEqual(len(self.events),1)
         self.assertEqual(self.events[0]['status'],'recovered')
         self.assertEqual(self.events[0]['metadata']['episode'],'existing-episode')
+
+    def error_sample(self, errors=1):
+        sample=self.valid()
+        sample['application_errors']=errors
+        return sample
+
+    def age_error_recovery(self, seconds=61):
+        state=json.loads(self.state.read_text())
+        state['application_errors_recovery']['first_observed_at']=(
+            datetime.now(timezone.utc)-timedelta(seconds=seconds)).isoformat()
+        self.state.write_text(json.dumps(state))
+
+    def test_error_log_episode_survives_restarts_until_count_and_clean_duration_are_met(self):
+        self.run_monitor(self.error_sample())
+        firing=self.events[0]
+        self.assertEqual((firing['reason_code'],firing['status']),('application_errors','firing'))
+        for _ in range(3):
+            self.run_monitor(self.valid())
+        self.assertEqual(self.events,[firing])  # Three fast samples are not sixty seconds.
+        self.age_error_recovery()
+        self.run_monitor(self.valid())
+        self.assertEqual([event['status'] for event in self.events],['firing','recovered'])
+        self.assertEqual(self.events[1]['metadata']['episode'],firing['metadata']['episode'])
+        self.run_monitor(self.valid())
+        self.assertEqual(len(self.events),2)
+
+    def test_positive_error_burst_and_unknown_probe_each_break_the_clean_streak(self):
+        self.run_monitor(self.error_sample(144))
+        firing=self.events[0]
+        for interruption in (self.error_sample(150),'exit'):
+            self.run_monitor(self.error_sample())
+            self.run_monitor(self.valid())
+            self.run_monitor(self.valid())
+            self.age_error_recovery()
+            self.run_monitor(interruption)
+            self.run_monitor(self.valid())
+            self.age_error_recovery()
+            self.run_monitor(self.valid())
+            self.assertEqual(self.events,[firing])  # Duration alone cannot close the episode.
+        self.run_monitor(self.valid())
+        self.assertEqual([event['status'] for event in self.events],['firing','recovered'])
+        self.assertEqual(self.events[1]['metadata']['episode'],firing['metadata']['episode'])
+
+    def test_error_recovery_wait_preserves_immediate_critical_checks(self):
+        self.run_monitor(self.error_sample())
+        self.run_monitor(self.valid())
+        sample=self.valid(application=False)
+        sample['database']=False
+        sample['disk']['free']=4
+        self.run_monitor(sample)
+        self.assertEqual([(event['reason_code'],event['severity']) for event in self.events],
+                         [('application_errors','error'),('disk','critical'),
+                          ('database','critical'),('application','critical')])
+
+    def test_failed_error_recovery_retries_the_exact_payload_after_restart(self):
+        self.run_monitor(self.error_sample())
+        self.run_monitor(self.valid())
+        self.age_error_recovery()
+        self.run_monitor(self.valid())
+        self.fail_delivery=True
+        self.run_monitor(self.valid(),success=False)
+        pending=json.loads(self.state.read_text())['pending']
+        self.assertEqual(pending['status'],'recovered')
+        self.assertEqual(pending,self.events[-1])
+        self.run_monitor(self.valid())
+        self.assertEqual(self.events[-2:], [pending,pending])
+        self.assertNotIn('pending',json.loads(self.state.read_text()))
 
     def test_failed_delivery_retries_identical_payload_before_recovery(self):
         self.config.update(transport_failure_samples=1,transport_failure_seconds=0)

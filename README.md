@@ -85,7 +85,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.51", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.52", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -253,10 +253,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.51/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.51/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.51/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.51/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.52/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.52/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.52/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.52/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable
@@ -349,3 +349,18 @@ Run the isolated regressions with `python3 test/watchdog_recovery_test.py` in an
 environment containing Jinja2 and jq. All network, service, proxy and notification
 operations are faked. Public outage, notification retry, stable recovery, direct
 app recovery and standby failover are checked against the actual managed template.
+
+## Operations-monitor error-log recovery
+
+The independent operations monitor reports application error logs immediately,
+even when readiness and PostgreSQL are healthy. It closes that error-log episode
+only after three consecutive valid zero-error observations spanning at least
+60 seconds. A new error or an unknown probe breaks the clean streak while
+retaining the active episode. The clean streak survives observer invocations;
+failed event delivery retries the identical payload and idempotency key.
+Readiness, database and disk failures retain their immediate alerts, and
+observer transport still requires three failed observations spanning 60 seconds.
+
+Run the isolated monitor regressions with
+`python3 -m unittest discover -s test -p phoenix_operations_monitor_test.py`.
+They use synthetic probe processes and a local receipt receiver.

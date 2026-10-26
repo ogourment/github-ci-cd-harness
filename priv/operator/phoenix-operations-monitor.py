@@ -155,6 +155,24 @@ def transport_error_category(error):
     return 'invalid_sample'
 
 
+def coalesce_application_error_recovery(findings, state, now):
+    """Keep bursty log errors in one episode until sustained valid quiet."""
+    active = state.get('conditions', {}).get('application_errors', {}).get('severity')
+    if findings['application_errors'] or not active:
+        state.pop('application_errors_recovery', None)
+        return findings
+    clean = state.setdefault('application_errors_recovery',
+        {'count': 0, 'first_observed_at': now.isoformat()})
+    clean['count'] += 1
+    first = datetime.fromisoformat(clean['first_observed_at'])
+    if clean['count'] >= 3 and (now-first).total_seconds() >= 60:
+        state.pop('application_errors_recovery')
+        return findings
+    # Omitting this finding preserves the active severity and its original
+    # episode. Independent readiness, database and disk findings stay immediate.
+    return {name: severity for name, severity in findings.items() if name != 'application_errors'}
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True)
@@ -181,10 +199,12 @@ def main():
                 config['probe_argv'],capture_output=True,text=True,check=True,timeout=30).stdout
             sample=json.loads(raw)
             findings=conditions(config,sample)
+            findings=coalesce_application_error_recovery(findings,state,utcnow())
             findings['observer_transport']=None
             state.pop('transport_failure', None)
         except (ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError, OSError) as error:
             sample=None
+            state.pop('application_errors_recovery', None)
             transport_error=transport_error_category(error)
             findings=transport_failure(config,state,utcnow())
         for name,severity in findings.items():
@@ -192,7 +212,8 @@ def main():
             was_firing=bool(previous.get('severity'))
             if not severity and not was_firing:
                 continue
-            # Valid host failures and severity increases are immediate. A55ist
+            # Valid host failures and severity increases are immediate. Only
+            # error-log recovery waits for sustained quiet. A55ist
             # retains incident/delivery receipts and handles reminder coalescing.
             if severity == previous.get('severity'):
                 continue
