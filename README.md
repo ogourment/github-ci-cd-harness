@@ -3,6 +3,25 @@
 Provider-neutral CI/CD delivery for Elixir applications, consumed as a tagged
 git dependency.
 
+## Application error pages and compact guidance
+
+Each application supplies its own styled 404 page, with useful navigation and
+an actual HTTP 404 response. The delivery harness does not impose a brand,
+language, or shared page design. JSON/API errors retain their machine-readable
+format. See [the application error-page contract](docs/error-pages.md).
+
+At adoption and after a package upgrade, explicitly run:
+
+```sh
+mix cd.update_agents
+```
+
+This inserts or refreshes one small managed block in the consumer's `AGENTS.md`,
+preserving all surrounding instructions. It does not run on compilation, tests,
+or ordinary use. `mix cd.update_agents --check` detects stale guidance without
+writing. If the consumer intentionally has no `AGENTS.md`, keep that policy:
+read the linked contract during adoption/upgrades instead of creating a file.
+
 ## GitHub: build once, stage automatically, promote manually
 
 Copy and configure [the CI/staging caller](templates/github/ci.yml) and
@@ -85,7 +104,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.52", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.53", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -253,10 +272,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.52/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.52/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.52/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.52/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.53/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.53/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.53/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.53/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable

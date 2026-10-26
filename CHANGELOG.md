@@ -1,5 +1,10 @@
 ## 0.4.50
 
+## 0.4.53
+
+- Add an explicit, idempotent adoption/upgrade task for compact consumer guidance.
+- Document application-owned styled 404 pages, navigation and status preservation.
+
 - Allow at most five seconds of positive probe-clock skew while rejecting stale
   and genuinely future observations. Avoid false transport incidents from normal
   NTP differences between the VPS and independent observer.
