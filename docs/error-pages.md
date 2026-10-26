@@ -20,5 +20,5 @@ readable desktop/mobile rendering, useful working links, and the JSON error
 representation. Keep sensitive routes and secrets out of captures.
 
 Run `mix cd.update_agents` at initial adoption and after a package upgrade.
-Its managed consumer block remains two short lines; this document holds the
+Its managed consumer block remains one short line; this document holds the
 implementation detail. Normal compilation/tests never inject guidance.

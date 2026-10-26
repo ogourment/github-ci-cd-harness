@@ -35,7 +35,6 @@ defmodule Mix.Tasks.Cd.UpdateAgents do
     block = """
     #{@start}
     Provide an application-styled 404 page with useful navigation and HTTP status 404.
-    Refresh this block with `mix cd.update_agents` when adopting or upgrading ci_cd_harness.
     #{@finish}
     """
 
