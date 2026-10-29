@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from staging_receipt import receipt
+from security_hotfix import authorize
 
 
 def api(path):
@@ -30,10 +31,10 @@ def pages(path, key):
         page += 1
 
 
-def verify(run, jobs, artifacts, recorded, actual, repository, workflow, artifact):
+def verify(run, jobs, artifacts, recorded, actual, repository, workflow, artifact, approved_hotfix=False):
     require(run["repository"]["full_name"] == repository, "Wrong repository")
     require(run["path"] == workflow, "Wrong source workflow")
-    require(run["head_branch"] == "main" and run["event"] in ("push", "workflow_dispatch"), "Untrusted source branch/event")
+    require((run["head_branch"] == "main" or approved_hotfix) and run["event"] in ("push", "workflow_dispatch"), "Untrusted source branch/event")
     require(run["status"] == "completed" and run["conclusion"] == "success", "Source run is not successful")
     require(any(j["name"].split(" / ")[-1] == "deploy_staging" and j["conclusion"] == "success" and j["run_attempt"] == run["run_attempt"] for j in jobs), "No successful staging job in this attempt")
     for name in (artifact, artifact + "-staging-verification"):
@@ -54,11 +55,16 @@ def main():
     repository = os.environ["GITHUB_REPOSITORY"]
     prefix = f"repos/{repository}/actions/runs/{source}"
     run = api(prefix)
+    approval = None
+    if run['head_branch'] != 'main':
+        approval = authorize(run, repository, os.environ['SOURCE_WORKFLOW'], os.environ.get('SECURITY_HOTFIX_POLICY', ''))
     recorded = json.loads(Path("_verification/staging-verification.json").read_text())
     # Recompute using the SOURCE identity, never the promotion workflow's commit.
     os.environ.update(GITHUB_RUN_ID=source, GITHUB_RUN_ATTEMPT=str(run["run_attempt"]), GITHUB_SHA=run["head_sha"])
-    verify(run, pages(prefix + "/jobs?filter=latest", "jobs"), pages(prefix + "/artifacts", "artifacts"), recorded, receipt("_build"), repository, os.environ["SOURCE_WORKFLOW"], os.environ["RELEASE_ARTIFACT_NAME"])
+    verify(run, pages(prefix + "/jobs?filter=latest", "jobs"), pages(prefix + "/artifacts", "artifacts"), recorded, receipt("_build"), repository, os.environ["SOURCE_WORKFLOW"], os.environ["RELEASE_ARTIFACT_NAME"], approved_hotfix=approval is not None)
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+        if approval:
+            output.write('production_base=' + json.dumps(approval['production_base'], separators=(',', ':')) + '\n')
         output.write(f"sha={recorded['sha']}\nrelease_id={recorded['release_id']}\nversion={recorded['version']}\n")
     print(f"Verified staging artifact {recorded['release_id']} from run {source}, attempt {run['run_attempt']}")
 

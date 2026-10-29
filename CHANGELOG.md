@@ -1,3 +1,9 @@
+## 0.4.54
+
+- Add an opt-in exact-commit security-only staging/promotion lane, with expiring
+  main-owned approvals, production-base ancestry/diff checks, PATCH-only releases,
+  migration rejection and live production-base verification. Default remains main-only.
+
 ## 0.4.50
 
 ## 0.4.53

@@ -62,6 +62,22 @@ class PromotionTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.check()
 
+    def test_approved_hotfix_still_requires_successful_staging_and_unchanged_bytes(self):
+        self.run['head_branch'] = 'security/fix'
+        self.run['event'] = 'workflow_dispatch'
+        def verify_hotfix():
+            verify(self.run, self.jobs, self.artifacts, self.recorded, self.recorded,
+                   'owner/app', '.github/workflows/ci.yml', 'demo-release', approved_hotfix=True)
+        verify_hotfix()
+        self.jobs[0]['conclusion'] = 'failure'
+        with self.assertRaises(ValueError):
+            verify_hotfix()
+        self.jobs[0]['conclusion'] = 'success'
+        with self.assertRaises(ValueError):
+            verify(self.run, self.jobs, self.artifacts, self.recorded,
+                   dict(self.recorded, sha256='changed'), 'owner/app',
+                   '.github/workflows/ci.yml', 'demo-release', approved_hotfix=True)
+
     def test_failed_skipped_or_previous_staging_attempt_is_rejected(self):
         original = copy.deepcopy(self.jobs[0])
         for fields in (dict(conclusion="failure"), dict(conclusion="skipped"), dict(run_attempt=2), dict(name="not_deploy_staging")):

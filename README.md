@@ -104,7 +104,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.53", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.54", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -272,10 +272,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.53/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.53/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.53/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.53/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.54/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.54/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.54/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.54/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable
@@ -383,3 +383,28 @@ observer transport still requires three failed observations spanning 60 seconds.
 Run the isolated monitor regressions with
 `python3 -m unittest discover -s test -p phoenix_operations_monitor_test.py`.
 They use synthetic probe processes and a local receipt receiver.
+
+
+## Security-only hotfixes (0.4.54)
+
+Main-only delivery remains the default. A consumer may explicitly set
+`security-hotfix-policy: .github/security-hotfixes.json` in its staging caller
+and its main-only promotion caller. A dispatched `security/` branch is eligible
+only when a policy fetched from an immutable current-main revision approves its
+exact source SHA, branch, production base SHA, binary diff SHA-256 and expiry.
+The approved base must be an ancestor and identify a successful production-source
+run; application version must stay within a PATCH line and migrations are refused.
+Review the entire exact diff before adding an approval. The policy is a release
+authorization record, not an advisory scanner or automatic proof of security scope.
+
+Schema1 policy: `{"schema":1,"approvals":[{"purpose":"security-only","sha":"<40hex>",
+"base_sha":"<40hex>","branch":"security/fix","diff_sha256":"<64hex>",
+"expires_at":"<UTC timestamp>","production_base":{"version":"1.2.3",
+"release_id":"app-1.2.3-42","pipeline_id":"42"}}]}`.
+
+The same successful CI run must produce the original release and a genuine
+staging-verification receipt. Promotion rechecks the approval and all existing
+artifact/run/attempt/identity gates, and refuses a production base whose healthy
+version, release ID or source pipeline has moved. Existing deployment concurrency,
+health verification, rollback and release-tag protections remain in force. Remove
+expired or superseded approvals. A new SHA always needs a new reviewed approval.

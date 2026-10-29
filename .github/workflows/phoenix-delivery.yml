@@ -3,6 +3,9 @@ name: Reusable Phoenix delivery
 on:
   workflow_call:
     inputs:
+      security-hotfix-policy:
+        type: string
+        default: ""
       artifact-name:
         type: string
         default: phoenix-release
@@ -54,6 +57,7 @@ on:
         required: false
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
@@ -61,18 +65,25 @@ jobs:
     concurrency:
       group: ${{ github.repository }}-staging
       cancel-in-progress: false
-    if: ${{ inputs.deploy-staging && github.ref == 'refs/heads/main' }}
+    if: ${{ inputs.deploy-staging && (github.ref == 'refs/heads/main' || inputs.security-hotfix-policy != '') }}
     runs-on: ubuntu-latest
     environment:
       name: staging
       url: ${{ inputs.staging-environment-url }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/checkout@v6
         with:
           repository: ogourment/github-ci-cd-harness
-          ref: v0.4.46
+          ref: v0.4.54
           path: .ci-cd-harness
+      - name: Authorize exact security-only source before staging
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SECURITY_HOTFIX_POLICY: ${{ inputs.security-hotfix-policy }}
+        run: python3 .ci-cd-harness/priv/forges/github/security_hotfix.py
       - uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.artifact-name }}
@@ -138,7 +149,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: ogourment/github-ci-cd-harness
-          ref: v0.4.46
+          ref: v0.4.54
           path: .ci-cd-harness
       - uses: actions/download-artifact@v4
         with:
@@ -187,7 +198,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: ogourment/github-ci-cd-harness
-          ref: v0.4.46
+          ref: v0.4.54
           path: .ci-cd-harness
       - uses: actions/download-artifact@v4
         with:

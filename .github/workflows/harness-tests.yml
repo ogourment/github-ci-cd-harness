@@ -48,6 +48,8 @@ jobs:
         run: test/github_phoenix_delivery_contract_test.sh
       - name: Verify staging-to-production promotion flows
         run: python3 -m unittest discover -s test -p github_promotion_test.py -v
+      - name: Verify exact security-only hotfix admission
+        run: python3 test/github_security_hotfix_test.py
       - name: Run backup and restore integration
         env:
           BACKUP_RESTORE_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres

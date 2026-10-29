@@ -3,6 +3,9 @@ name: Promote staging-verified Phoenix release
 on:
   workflow_call:
     inputs:
+      security-hotfix-policy:
+        type: string
+        default: ""
       source-run-id:
         type: string
         required: true
@@ -51,10 +54,12 @@ jobs:
       url: ${{ inputs.production-environment-url }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/checkout@v6
         with:
           repository: ogourment/github-ci-cd-harness
-          ref: v0.4.46
+          ref: v0.4.54
           path: .ci-cd-harness
       - uses: actions/download-artifact@v4
         with:
@@ -72,6 +77,7 @@ jobs:
         id: verified
         env:
           GH_TOKEN: ${{ github.token }}
+          SECURITY_HOTFIX_POLICY: ${{ inputs.security-hotfix-policy }}
           SOURCE_RUN_ID: ${{ inputs.source-run-id }}
           SOURCE_WORKFLOW: ${{ inputs.source-workflow }}
           RELEASE_ARTIFACT_NAME: ${{ inputs.artifact-name }}
@@ -91,6 +97,12 @@ jobs:
         run: |
           mkdir -p _build/prod/rel
           tar -C _build/prod/rel -xzf _build/release.tar.gz
+      - name: Verify approved production base immediately before hotfix promotion
+        if: ${{ steps.verified.outputs.production_base != '' }}
+        env:
+          EXPECTED_PRODUCTION_BASE: ${{ steps.verified.outputs.production_base }}
+          PRODUCTION_HEALTH_URL: ${{ inputs.production-environment-url }}/health
+        run: python3 .ci-cd-harness/priv/forges/github/security_hotfix.py production-base
       - name: Promote and verify production health identity
         env:
           CI_CD_OTP_APP: ${{ inputs.otp-app }}
