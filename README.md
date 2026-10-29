@@ -387,7 +387,8 @@ They use synthetic probe processes and a local receipt receiver.
 
 ## Security-only hotfixes (0.4.54)
 
-Main-only delivery remains the default. A consumer may explicitly set
+The CI caller must grant `actions: read` alongside its existing permissions,
+because the reusable verifier reads run provenance. Main-only delivery remains the default. A consumer may explicitly set
 `security-hotfix-policy: .github/security-hotfixes.json` in its staging caller
 and its main-only promotion caller. A dispatched `security/` branch is eligible
 only when a policy fetched from an immutable current-main revision approves its
