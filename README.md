@@ -3,6 +3,20 @@
 Provider-neutral CI/CD delivery for Elixir applications, consumed as a tagged
 git dependency.
 
+## Thumbnail content cache (local implementation, not released)
+
+Thumbnail generation reuses identical image bytes across filenames and runs.
+The cache key includes SHA-256, the converter/version and the actual rendering
+options. Cached output checksums are verified; incomplete or damaged entries
+are rendered again. Originals, test results and acceptance gates are unchanged.
+Metrics distinguish rendered images and cache hits.
+
+`ATDD_THUMBNAIL_CACHE_DIR` defaults to `_build/test/atdd-thumbnail-cache`, outside
+published evidence. Consumers must preserve that directory in their private CI
+cache to reuse it across jobs. Cache expiry/bounds and consumer release wiring
+remain to be completed before shipping this increment; it is not active in the
+current Ecojeux release.
+
 ## Application error pages and compact guidance
 
 Each application supplies its own styled 404 page, with useful navigation and
