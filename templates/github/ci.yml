@@ -9,7 +9,7 @@ permissions:
   contents: write
 jobs:
   phoenix:
-    uses: ogourment/github-ci-cd-harness/.github/workflows/phoenix.yml@v0.4.54
+    uses: ogourment/github-ci-cd-harness/.github/workflows/phoenix.yml@v0.4.55
     with:
       build-release: true
       release-artifact-name: phoenix-release
@@ -17,7 +17,7 @@ jobs:
   delivery:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     needs: phoenix
-    uses: ogourment/github-ci-cd-harness/.github/workflows/phoenix-delivery.yml@v0.4.54
+    uses: ogourment/github-ci-cd-harness/.github/workflows/phoenix-delivery.yml@v0.4.55
     with:
       artifact-name: phoenix-release
       otp-app: example_app

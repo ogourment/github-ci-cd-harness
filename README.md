@@ -104,7 +104,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.54", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.55", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -272,10 +272,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.54/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.54/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.54/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.54/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.55/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.55/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.55/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.55/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable
@@ -409,3 +409,22 @@ artifact/run/attempt/identity gates, and refuses a production base whose healthy
 version, release ID or source pipeline has moved. Existing deployment concurrency,
 health verification, rollback and release-tag protections remain in force. Remove
 expired or superseded approvals. A new SHA always needs a new reviewed approval.
+
+## Bounded optional GitLab history
+
+Source `priv/forges/gitlab/history_http.sh` and call `history_http_init` once before
+historical reporting. `history_http_get PATH` buffers a successful response;
+HTTP errors, redirects and timeouts return nonzero without partial/error output.
+`history_http_run COMMAND...` applies the same deadline to local collection.
+The exported absolute deadline survives command substitutions and nested shells.
+
+`HISTORY_HTTP_BUDGET_SECONDS` defaults to 120 and
+`HISTORY_HTTP_REQUEST_SECONDS` to 15 (both 1..300). Connect time is at most 5s;
+forced termination has a 2s grace. Once the shared budget is exhausted, callers
+must stop collecting and retain unavailable/NA values, preserving current quality
+job results. Rendering existing results is outside the historical collection budget.
+
+Use trusted `HISTORY_HTTP_API_ROOT`, `HISTORY_HTTP_AUTH_HEADER` (`PRIVATE-TOKEN` or
+`JOB-TOKEN`) and `HISTORY_HTTP_TOKEN` server configuration. Headers pass through
+stdin rather than argv or disk. Redirects never receive credentials. Without an
+API root the helper bounds `glab api` instead. No credentials are provisioned.

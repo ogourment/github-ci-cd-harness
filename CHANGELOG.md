@@ -1,3 +1,10 @@
+## 0.4.55
+
+- Add bounded optional GitLab historical reporting transport: a shared absolute
+  collection deadline, per-request curl/glab timeouts, private stdin credentials,
+  redirect refusal and unavailable-history outcomes instead of partial responses.
+  Current quality gates remain consumer-owned and unchanged.
+
 ## 0.4.54
 
 - Add an opt-in exact-commit security-only staging/promotion lane, with expiring
