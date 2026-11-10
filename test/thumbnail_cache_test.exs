@@ -39,6 +39,18 @@ defmodule CiCdHarness.ThumbnailCacheTest do
       out
     end
 
+    {uncached, 0} =
+      System.cmd("bash", [@script, Path.join(root, "evidence")],
+        env: [
+          {"ATDD_THUMBNAIL_CONVERTER", converter},
+          {"ATDD_THUMBNAIL_CACHE_DIR", ""},
+          {"TEST_RENDERER_VERSION", version}
+        ],
+        stderr_to_stdout: true
+      )
+
+    assert uncached =~ "count=2 rendered=2 cache_hits=0"
+
     assert run.() =~ "count=2 rendered=1 cache_hits=1"
     File.rename!(Path.join(shots, "first.png"), Path.join(shots, "renamed.png"))
     assert run.() =~ "count=2 rendered=0 cache_hits=2"

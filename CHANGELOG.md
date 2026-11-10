@@ -1,9 +1,10 @@
 ## 0.4.56
 
-- Reuse thumbnail bytes by verified source, renderer and output-settings checksums.
+- Opt into thumbnail reuse through ATDD_THUMBNAIL_CACHE_DIR, preserving
+  existing uncached callers. Reuse thumbnail bytes by verified source, renderer and output-settings checksums.
   Preserve all acceptance results and original screenshots. Bound the private
   derived cache to seven idle days and 256 MiB; consumers retain its directory
-  in their existing private CI cache. Python 3 is required for cache maintenance.
+  in their existing private CI cache. Python 3 is required only for opted-in cache maintenance.
 
 ## 0.4.55
 

@@ -11,12 +11,13 @@ options. Cached output checksums are verified; incomplete or damaged entries
 are rendered again. Originals, test results and acceptance gates are unchanged.
 Metrics distinguish rendered images and cache hits.
 
-`ATDD_THUMBNAIL_CACHE_DIR` defaults to `_build/test/atdd-thumbnail-cache`, outside
-published evidence. Consumers must preserve that directory in their private CI
-cache to reuse it across jobs. Derived entries expire after seven days without reuse. Oldest entries are
+Caching is opt-in through `ATDD_THUMBNAIL_CACHE_DIR`, for example
+`_build/test/atdd-thumbnail-cache`, outside published evidence. Existing callers
+retain uncached rendering. Consumers preserve the chosen directory in their
+private CI cache to reuse it across jobs. Derived entries expire after seven days without reuse. Oldest entries are
 trimmed to 256 MiB after generation. Cleanup only handles checksum-named cache
 entries and leaves originals and unrelated paths intact. Python 3 is required
-for bounded cache maintenance. Ecojeux adoption is a separate consumer change.
+when opting into bounded cache maintenance. Ecojeux adoption is a separate consumer change.
 
 ## Application error pages and compact guidance
 

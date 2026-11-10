@@ -5,7 +5,7 @@ evidence_dir="${1:?Evidence directory required}"
 screenshots_dir="${evidence_dir%/}/screenshots"
 thumbnails_dir="${evidence_dir%/}/thumbnails"
 stats_file="${ATDD_THUMBNAIL_STATS_FILE:-}"
-cache_dir="${ATDD_THUMBNAIL_CACHE_DIR:-_build/test/atdd-thumbnail-cache}"
+cache_dir="${ATDD_THUMBNAIL_CACHE_DIR:-}"
 started_at="${SECONDS}"
 
 if [[ ! -d "${screenshots_dir}" ]]; then
@@ -29,7 +29,7 @@ if ! command -v "${converter}" >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v python3 >/dev/null 2>&1; then
+if [[ -n "${cache_dir}" ]] && ! command -v python3 >/dev/null 2>&1; then
   echo "ATDD thumbnail cache maintenance requires Python 3" >&2
   exit 1
 fi
@@ -53,9 +53,13 @@ checksum() {
 # Include the actual renderer and all output settings, not just the source.
 # Cache contents are derived files only; evidence originals are never replaced.
 thumbnail_options=(-thumbnail '480x>' -strip -quality 70)
-renderer_key="$(printf '%s\n' 'thumbnail-cache-v1' "${converter}" \
-  "$("${converter}" -version)" "${thumbnail_options[@]}" 'webp' | checksum)"
-mkdir -p "${thumbnails_dir}" "${cache_dir}/${renderer_key}"
+renderer_key=""
+if [[ -n "${cache_dir}" ]]; then
+  renderer_key="$(printf '%s\n' 'thumbnail-cache-v1' "${converter}" \
+    "$("${converter}" -version)" "${thumbnail_options[@]}" 'webp' | checksum)"
+  mkdir -p "${cache_dir}/${renderer_key}"
+fi
+mkdir -p "${thumbnails_dir}"
 temporary=""
 stats_temporary=""
 cache_temporary=""
@@ -81,13 +85,16 @@ while IFS= read -r -d '' screenshot; do
   filename="${screenshot##*/}"
   thumbnail="${thumbnails_dir}/${filename%.png}.webp"
   temporary="$(mktemp "${thumbnails_dir}/.${filename%.png}.tmp.XXXXXX.webp")"
-  source_key="$(checksum < "${screenshot}")"
+  source_key=""
+  if [[ -n "${cache_dir}" ]]; then
+    source_key="$(checksum < "${screenshot}")"
+  fi
   cached="${cache_dir}/${renderer_key}/${source_key}.webp"
   cache_hit=false
 
   # A width-only geometry preserves the full-page aspect ratio. The trailing
   # `>` prevents small screenshots from being enlarged.
-  if [[ -s "${cached}" && -f "${cached}.sha256" ]] &&
+  if [[ -n "${cache_dir}" && -s "${cached}" && -f "${cached}.sha256" ]] &&
     cp -- "${cached}" "${temporary}" 2>/dev/null &&
     [[ "$(checksum < "${temporary}")" == "$(cat "${cached}.sha256" 2>/dev/null)" ]]; then
     touch -c -- "${cached}" "${cached}.sha256" 2>/dev/null || true
@@ -109,7 +116,7 @@ while IFS= read -r -d '' screenshot; do
 
   # Atomic publication lets concurrent jobs safely share a cache. A partial or
   # damaged entry is a miss and is regenerated, never accepted by filename.
-  if [[ "${cache_hit}" == false ]]; then
+  if [[ -n "${cache_dir}" && "${cache_hit}" == false ]]; then
     cache_temporary="$(mktemp "${cached}.tmp.XXXXXX")"
     cp -- "${temporary}" "${cache_temporary}"
     checksum < "${cache_temporary}" > "${cache_temporary}.sha256"
@@ -125,7 +132,9 @@ while IFS= read -r -d '' screenshot; do
   thumbnail_bytes=$((thumbnail_bytes + $(file_size "${thumbnail}")))
 done < <(find "${screenshots_dir}" -maxdepth 1 -type f -name '*.png' -print0)
 
-python3 "$(dirname "${BASH_SOURCE[0]}")/atdd_thumbnail_cache_prune.py" "${cache_dir}"
+if [[ -n "${cache_dir}" ]]; then
+  python3 "$(dirname "${BASH_SOURCE[0]}")/atdd_thumbnail_cache_prune.py" "${cache_dir}"
+fi
 
 saved_bytes=$((source_bytes - thumbnail_bytes))
 duration_seconds=$((SECONDS - started_at))
