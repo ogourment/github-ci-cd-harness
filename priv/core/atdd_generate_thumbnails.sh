@@ -29,6 +29,11 @@ if ! command -v "${converter}" >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ATDD thumbnail cache maintenance requires Python 3" >&2
+  exit 1
+fi
+
 file_size() {
   if stat -c '%s' -- "$1" >/dev/null 2>&1; then
     stat -c '%s' -- "$1"
@@ -83,8 +88,9 @@ while IFS= read -r -d '' screenshot; do
   # A width-only geometry preserves the full-page aspect ratio. The trailing
   # `>` prevents small screenshots from being enlarged.
   if [[ -s "${cached}" && -f "${cached}.sha256" ]] &&
-    [[ "$(checksum < "${cached}")" == "$(cat "${cached}.sha256")" ]]; then
-    cp -- "${cached}" "${temporary}"
+    cp -- "${cached}" "${temporary}" 2>/dev/null &&
+    [[ "$(checksum < "${temporary}")" == "$(cat "${cached}.sha256" 2>/dev/null)" ]]; then
+    touch -c -- "${cached}" "${cached}.sha256" 2>/dev/null || true
     cache_hit=true
     cache_hit_count=$((cache_hit_count + 1))
   elif ! "${converter}" "${screenshot}" \
@@ -118,6 +124,8 @@ while IFS= read -r -d '' screenshot; do
   source_bytes=$((source_bytes + $(file_size "${screenshot}")))
   thumbnail_bytes=$((thumbnail_bytes + $(file_size "${thumbnail}")))
 done < <(find "${screenshots_dir}" -maxdepth 1 -type f -name '*.png' -print0)
+
+python3 "$(dirname "${BASH_SOURCE[0]}")/atdd_thumbnail_cache_prune.py" "${cache_dir}"
 
 saved_bytes=$((source_bytes - thumbnail_bytes))
 duration_seconds=$((SECONDS - started_at))

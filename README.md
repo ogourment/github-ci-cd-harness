@@ -3,7 +3,7 @@
 Provider-neutral CI/CD delivery for Elixir applications, consumed as a tagged
 git dependency.
 
-## Thumbnail content cache (local implementation, not released)
+## Thumbnail content cache
 
 Thumbnail generation reuses identical image bytes across filenames and runs.
 The cache key includes SHA-256, the converter/version and the actual rendering
@@ -13,9 +13,10 @@ Metrics distinguish rendered images and cache hits.
 
 `ATDD_THUMBNAIL_CACHE_DIR` defaults to `_build/test/atdd-thumbnail-cache`, outside
 published evidence. Consumers must preserve that directory in their private CI
-cache to reuse it across jobs. Cache expiry/bounds and consumer release wiring
-remain to be completed before shipping this increment; it is not active in the
-current Ecojeux release.
+cache to reuse it across jobs. Derived entries expire after seven days without reuse. Oldest entries are
+trimmed to 256 MiB after generation. Cleanup only handles checksum-named cache
+entries and leaves originals and unrelated paths intact. Python 3 is required
+for bounded cache maintenance. Ecojeux adoption is a separate consumer change.
 
 ## Application error pages and compact guidance
 
@@ -118,7 +119,7 @@ rewritten.
 ## Usage
 
 ```elixir
-{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.55", only: [:dev, :test], runtime: false}
+{:ci_cd_harness, git: "https://git.agile-u.com/olivierg/ci-cd-harness.git", tag: "v0.4.56", only: [:dev, :test], runtime: false}
 ```
 
 Build a release with a traceable identity:
@@ -286,10 +287,10 @@ GitLab consumers can include the tagged public adapter directly:
 
 ```yaml
 include:
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.55/templates/gitlab/permit.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.55/templates/gitlab/acceptance.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.55/templates/gitlab/cd.yml"
-  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.55/templates/gitlab/quality.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.56/templates/gitlab/permit.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.56/templates/gitlab/acceptance.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.56/templates/gitlab/cd.yml"
+  - remote: "https://git.agile-u.com/olivierg/ci-cd-harness/raw/tag/v0.4.56/templates/gitlab/quality.yml"
 ```
 
 The adapter is deliberately thin: it defines GitLab's job graph and variable

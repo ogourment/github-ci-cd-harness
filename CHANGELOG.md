@@ -1,3 +1,10 @@
+## 0.4.56
+
+- Reuse thumbnail bytes by verified source, renderer and output-settings checksums.
+  Preserve all acceptance results and original screenshots. Bound the private
+  derived cache to seven idle days and 256 MiB; consumers retain its directory
+  in their existing private CI cache. Python 3 is required for cache maintenance.
+
 ## 0.4.55
 
 - Add bounded optional GitLab historical reporting transport: a shared absolute
@@ -11,12 +18,22 @@
   main-owned approvals, production-base ancestry/diff checks, PATCH-only releases,
   migration rejection and live production-base verification. Default remains main-only.
 
-## 0.4.50
-
 ## 0.4.53
 
 - Add an explicit, idempotent adoption/upgrade task for compact consumer guidance.
 - Document application-owned styled 404 pages, navigation and status preservation.
+
+## 0.4.52
+
+- Debounce transient observer transport failures and require stable quiet before
+  recovering an operations error-log incident.
+
+## 0.4.51
+
+- Explain independent operations check outcomes and correlate recovery without
+  duplicate readiness-error notifications.
+
+## 0.4.50
 
 - Allow at most five seconds of positive probe-clock skew while rejecting stale
   and genuinely future observations. Avoid false transport incidents from normal
