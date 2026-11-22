@@ -111,6 +111,9 @@ GitLab template's logic verbatim, with one input made explicit:
 The GitLab adapter derives an immutable job-artifact URL when a consumer does
 not provide an explicit live evidence URL.
 Evidence is produced even when scenarios fail — the gate is a separate step.
+If the failure-diagnostics process is killed, the wrapper records its exit
+status in `status.env` and retains the raw test log. Signal exits skip the
+legacy retry. The original test result and release gate still apply.
 
 `CiCdHarness.normalized_env/0` maps Forgejo's GitHub-compatible variables onto
 the `CI_*` names the existing deployment shell already understands. That is the

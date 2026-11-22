@@ -45,10 +45,20 @@ if [ ! -f "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" ]; then
 fi
 
 if [ "$ACCEPTANCE_TEST_EXIT_CODE" -ne 0 ]; then
+  diagnostics_status=0
   MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.append_failures "$acceptance_test_log" \
-    "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" "$ACCEPTANCE_EVIDENCE_DIR/failure_count.txt" "$ACCEPTANCE_EVIDENCE_DIR/failure_previews.json" || \
-  MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.append_failures "$acceptance_test_log" \
-    "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt" || true
+    "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" "$ACCEPTANCE_EVIDENCE_DIR/failure_count.txt" "$ACCEPTANCE_EVIDENCE_DIR/failure_previews.json" || diagnostics_status=$?
+  # A signal exit includes SIGKILL (137), observed when diagnostics hit the cgroup limit.
+  # Legacy output arguments are for compatibility, not a recovery from a signal.
+  if [ "$diagnostics_status" -ne 0 ] && [ "$diagnostics_status" -lt 128 ]; then
+    diagnostics_status=0
+    MIX_ENV="$ACCEPTANCE_MIX_ENV" mix acceptance.append_failures "$acceptance_test_log" \
+      "$ACCEPTANCE_EVIDENCE_DIR/e2e.md" "$ACCEPTANCE_EVIDENCE_DIR/failure_summary.txt" || diagnostics_status=$?
+  fi
+  printf 'ATDD_FAILURE_DIAGNOSTICS_EXIT_CODE=%s\n' "$diagnostics_status" >> "$ACCEPTANCE_EVIDENCE_DIR/status.env"
+  if [ "$diagnostics_status" -ne 0 ]; then
+    echo "Acceptance failure diagnostics exited with code $diagnostics_status. Raw test log retained."
+  fi
 fi
 
 acceptance_site_log="$ACCEPTANCE_EVIDENCE_DIR/site_build.log"
